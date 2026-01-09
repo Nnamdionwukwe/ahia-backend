@@ -1,16 +1,16 @@
-```
-# Environment variables
+# Environment Variables
 .env
-.env.production
 .env.local
 .env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Dependencies
+touch .gitignore
+```
+
+Add this inside:
+```
 node_modules/
-
-# Logs
-*.log
-
-# OS
+.env
 .DS_Store
-Thumbs.db
