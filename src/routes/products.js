@@ -1,8 +1,7 @@
-// src/routes/products.js
 const express = require("express");
 const router = express.Router();
 const productController = require("../controllers/productController");
-const { authenticateUser } = require("../middleware/auth");
+const { authenticateUser } = require("../middleware/auth"); // ADD THIS LINE
 
 router.get("/", productController.getProducts);
 router.get("/:id/details", productController.getProductDetails);
