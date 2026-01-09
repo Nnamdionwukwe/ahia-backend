@@ -23,9 +23,12 @@ app.use(helmet());
 app.use(
   cors({
     origin: [
+      "https://ahia-frontend-git-main-nnamdi-michaels-projects.vercel.app",
+      "https://ahia-backend-production.up.railway.app",
       "http://localhost:3000",
       "http://localhost:5173",
       "http://localhost:3001",
+      "http://localhost:5001",
     ],
     credentials: true,
   })
