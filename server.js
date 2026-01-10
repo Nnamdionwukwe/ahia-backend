@@ -42,6 +42,7 @@ app.use(
     credentials: true,
   })
 );
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -118,6 +119,7 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/wishlist", wishlistRoutes);
+app.use("/api/flash-sales", flashSalesRoutes);
 
 // =============================================
 // PHASE 5 ROUTES
@@ -128,7 +130,6 @@ app.use("/api/loyalty", loyaltyRoutes);
 app.use("/api/fraud", fraudRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/analytics", analyticsRoutes);
-app.use("/api/flash-sales", flashSalesRoutes);
 
 // =============================================
 // BACKGROUND JOBS (only in production/non-test)
