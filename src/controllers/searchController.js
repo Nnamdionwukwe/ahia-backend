@@ -3,11 +3,11 @@ const { Client } = require("@elastic/elasticsearch");
 const db = require("../config/database");
 const redis = require("../config/redis");
 
+// UPDATED: Use API key authentication instead of username/password
 const esClient = new Client({
   node: process.env.ELASTICSEARCH_URL || "http://localhost:9200",
   auth: {
-    username: process.env.ES_USERNAME || "elastic",
-    password: process.env.ES_PASSWORD || "changeme",
+    apiKey: process.env.ELASTICSEARCH_API_KEY || process.env.ES_PASSWORD,
   },
 });
 
