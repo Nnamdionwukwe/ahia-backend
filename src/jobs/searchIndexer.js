@@ -3,11 +3,11 @@ const cron = require("node-cron");
 const db = require("../config/database");
 const { Client } = require("@elastic/elasticsearch");
 
+// UPDATED: Use API key authentication
 const esClient = new Client({
   node: process.env.ELASTICSEARCH_URL || "http://localhost:9200",
   auth: {
-    username: process.env.ES_USERNAME || "elastic",
-    password: process.env.ES_PASSWORD || "changeme",
+    apiKey: process.env.ELASTICSEARCH_API_KEY || process.env.ES_PASSWORD,
   },
 });
 
@@ -128,7 +128,6 @@ cron.schedule("0 1 * * *", async () => {
 
     for (let i = 0; i < products.rows.length; i += batchSize) {
       const batch = products.rows.slice(i, i + batchSize);
-
       const operations = batch.flatMap((doc) => [
         { index: { _index: PRODUCTS_INDEX, _id: doc.id } },
         {
@@ -153,7 +152,6 @@ cron.schedule("0 1 * * *", async () => {
 
       await esClient.bulk({ operations });
       totalIndexed += batch.length;
-
       console.log(
         `Indexed ${totalIndexed}/${products.rows.length} products...`
       );
