@@ -2,8 +2,16 @@
 const db = require("../config/database");
 const redis = require("../config/redis");
 const { v4: uuidv4 } = require("uuid");
+const fraudDetectionController = require("./fraudDetectionController");
+const notificationsController = require("./notificationsController");
+const loyaltyController = require("./loyaltyController");
 
-// Checkout and create order
+// Helper function to calculate total
+const calculateTotal = (items) => {
+  return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+};
+
+// Checkout and create order with Phase 5 features
 exports.checkout = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -18,10 +26,10 @@ exports.checkout = async (req, res) => {
     // Get cart items
     const cartItems = await db.query(
       `SELECT c.*, pv.base_price, pv.discount_percentage, p.id as product_id
-             FROM carts c
-             JOIN product_variants pv ON c.product_variant_id = pv.id
-             JOIN products p ON pv.product_id = p.id
-             WHERE c.user_id = $1`,
+       FROM carts c
+       JOIN product_variants pv ON c.product_variant_id = pv.id
+       JOIN products p ON pv.product_id = p.id
+       WHERE c.user_id = $1`,
       [userId]
     );
 
@@ -41,7 +49,7 @@ exports.checkout = async (req, res) => {
     if (promo_code) {
       const promo = await db.query(
         `SELECT discount_percentage FROM promotions 
-                 WHERE code = $1 AND expiry_date > NOW()`,
+         WHERE code = $1 AND expiry_date > NOW()`,
         [promo_code]
       );
 
@@ -52,19 +60,44 @@ exports.checkout = async (req, res) => {
       }
     }
 
+    // Phase 5: Run fraud detection
+    const fraudCheck = await fraudDetectionController.analyzeOrder(
+      {
+        items: cartItems.rows,
+        totalAmount: totalAmount,
+        deliveryAddress: delivery_address,
+        paymentMethod: payment_method,
+        promoCode: promo_code,
+      },
+      userId,
+      req.ip,
+      req.headers["user-agent"]
+    );
+
+    // Phase 5: Handle fraud result
+    if (fraudCheck.action === "block") {
+      return res.status(403).json({
+        error: "Transaction blocked due to security concerns",
+      });
+    }
+
     // Create order
     const orderId = uuidv4();
+    const orderStatus =
+      fraudCheck.action === "review" ? "pending_review" : "pending";
+
     const order = await db.query(
       `INSERT INTO orders 
-             (id, user_id, total_amount, discount_amount, delivery_address, status, payment_method, created_at, updated_at, estimated_delivery)
-             VALUES ($1, $2, $3, $4, $5, 'pending', $6, NOW(), NOW(), NOW() + INTERVAL '5 days')
-             RETURNING *`,
+       (id, user_id, total_amount, discount_amount, delivery_address, status, payment_method, created_at, updated_at, estimated_delivery)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), NOW() + INTERVAL '5 days')
+       RETURNING *`,
       [
         orderId,
         userId,
         totalAmount,
         discountAmount,
         delivery_address,
+        orderStatus,
         payment_method,
       ]
     );
@@ -75,7 +108,7 @@ exports.checkout = async (req, res) => {
         item.base_price - (item.base_price * item.discount_percentage) / 100;
       await db.query(
         `INSERT INTO order_items (id, order_id, product_variant_id, quantity, unit_price, subtotal, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
         [
           uuidv4(),
           orderId,
@@ -91,10 +124,46 @@ exports.checkout = async (req, res) => {
     await db.query("DELETE FROM carts WHERE user_id = $1", [userId]);
     await redis.del(`cart:${userId}`);
 
+    // Phase 5: Send order confirmation notification
+    await notificationsController.notifyOrderUpdate(
+      userId,
+      orderId,
+      "confirmed",
+      `Your order #${order.rows[0].id} has been confirmed!`
+    );
+
+    // Phase 5: Award loyalty points
+    await loyaltyController.awardPoints(
+      userId,
+      Math.floor(totalAmount * 10),
+      `Purchase - Order #${order.rows[0].id}`,
+      orderId
+    );
+
+    // Phase 5: Check for referral bonus
+    const referral = await db.query(
+      `UPDATE referrals 
+       SET status = 'completed', completed_at = NOW(), points_awarded = 500
+       WHERE referred_user_id = $1 AND status = 'pending'
+       RETURNING referrer_id`,
+      [userId]
+    );
+
+    if (referral.rows.length > 0) {
+      // Award both users
+      await loyaltyController.awardPoints(
+        referral.rows[0].referrer_id,
+        500,
+        "Referral bonus"
+      );
+      await loyaltyController.awardPoints(userId, 100, "Welcome bonus");
+    }
+
     res.status(201).json({
       success: true,
       order: order.rows[0],
       itemCount: cartItems.rows.length,
+      fraudCheck: fraudCheck,
     });
   } catch (error) {
     console.error("Checkout error:", error);
@@ -155,10 +224,10 @@ exports.getOrderDetails = async (req, res) => {
 
     const items = await db.query(
       `SELECT oi.*, p.name, p.images, pv.color, pv.size
-             FROM order_items oi
-             JOIN product_variants pv ON oi.product_variant_id = pv.id
-             JOIN products p ON pv.product_id = p.id
-             WHERE oi.order_id = $1`,
+       FROM order_items oi
+       JOIN product_variants pv ON oi.product_variant_id = pv.id
+       JOIN products p ON pv.product_id = p.id
+       WHERE oi.order_id = $1`,
       [orderId]
     );
 
@@ -194,6 +263,14 @@ exports.cancelOrder = async (req, res) => {
     const updated = await db.query(
       `UPDATE orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1 RETURNING *`,
       [orderId]
+    );
+
+    // Phase 5: Send cancellation notification
+    await notificationsController.notifyOrderUpdate(
+      userId,
+      orderId,
+      "cancelled",
+      `Your order #${orderId} has been cancelled`
     );
 
     res.json({ success: true, order: updated.rows[0] });

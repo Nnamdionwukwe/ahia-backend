@@ -15,6 +15,7 @@ const cartRoutes = require("./src/routes/cart");
 const reviewRoutes = require("./src/routes/reviews");
 const orderRoutes = require("./src/routes/orders");
 const wishlistRoutes = require("./src/routes/wishlist");
+const flashSalesRoutes = require("./src/routes/flashSales");
 
 // Import Phase 5 routes
 const searchRoutes = require("./src/routes/search");
@@ -127,6 +128,7 @@ app.use("/api/loyalty", loyaltyRoutes);
 app.use("/api/fraud", fraudRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/flash-sales", flashSalesRoutes);
 
 // =============================================
 // BACKGROUND JOBS (only in production/non-test)
