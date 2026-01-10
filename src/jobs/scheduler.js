@@ -75,10 +75,8 @@ cron.schedule("* * * * *", async () => {
 cron.schedule("0 3 * * *", async () => {
   try {
     console.log("🎁 Processing expired loyalty points...");
-
     // Call the database function to expire points
     await db.query("SELECT expire_loyalty_points()");
-
     console.log("✅ Expired loyalty points processed");
   } catch (error) {
     console.error("Loyalty points expiration error:", error);
@@ -89,13 +87,11 @@ cron.schedule("0 3 * * *", async () => {
 cron.schedule("30 3 * * *", async () => {
   try {
     console.log("🧹 Cleaning up old analytics events...");
-
     // Keep only last 90 days
     const deleted = await db.query(
       `DELETE FROM analytics_events 
        WHERE created_at < NOW() - INTERVAL '90 days'`
     );
-
     console.log(`✅ Deleted ${deleted.rowCount} old analytics events`);
   } catch (error) {
     console.error("Analytics cleanup error:", error);
@@ -106,7 +102,6 @@ cron.schedule("30 3 * * *", async () => {
 cron.schedule("*/15 * * * *", async () => {
   try {
     console.log("📈 Updating trending products...");
-
     // Get products with most views in last 24 hours
     const trending = await db.query(
       `SELECT product_id, COUNT(*) as views
@@ -125,10 +120,8 @@ cron.schedule("*/15 * * * *", async () => {
 
     // Update Redis sorted set
     const pipeline = redis.multi();
-
     // Clear old data
     pipeline.del("hot_products");
-
     // Add new trending products
     for (const product of trending.rows) {
       pipeline.zAdd("hot_products", {
@@ -136,9 +129,7 @@ cron.schedule("*/15 * * * *", async () => {
         value: product.product_id,
       });
     }
-
     await pipeline.exec();
-
     console.log(`✅ Updated ${trending.rows.length} trending products`);
   } catch (error) {
     console.error("Update trending error:", error);
@@ -149,14 +140,12 @@ cron.schedule("*/15 * * * *", async () => {
 cron.schedule("0 2 * * *", async () => {
   try {
     console.log("🧹 Cleaning up old notifications...");
-
     // Delete read notifications older than 30 days
     const deleted = await db.query(
       `DELETE FROM notifications 
        WHERE is_read = true 
        AND read_at < NOW() - INTERVAL '30 days'`
     );
-
     console.log(`✅ Deleted ${deleted.rowCount} old notifications`);
   } catch (error) {
     console.error("Notification cleanup error:", error);
@@ -167,7 +156,6 @@ cron.schedule("0 2 * * *", async () => {
 cron.schedule("0 4 * * *", async () => {
   try {
     console.log("👥 Updating user segments...");
-
     // Get all active segments
     const segments = await db.query(
       "SELECT * FROM user_segments WHERE is_active = true"
@@ -179,7 +167,6 @@ cron.schedule("0 4 * * *", async () => {
     }
 
     let totalUpdated = 0;
-
     for (const segment of segments.rows) {
       // Clear existing members
       await db.query("DELETE FROM user_segment_members WHERE segment_id = $1", [
@@ -249,7 +236,6 @@ cron.schedule("0 4 * * *", async () => {
 cron.schedule("0 5 * * *", async () => {
   try {
     console.log("📊 Generating daily reports...");
-
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const dateStr = yesterday.toISOString().split("T")[0];
@@ -293,7 +279,6 @@ cron.schedule("0 5 * * *", async () => {
 cron.schedule("0 */6 * * *", async () => {
   try {
     console.log("🛒 Checking abandoned carts...");
-
     // Find users who added items to cart but didn't purchase
     const abandoned = await db.query(
       `SELECT DISTINCT ae.user_id, ae.event_data->>'productId' as product_id
@@ -341,7 +326,6 @@ cron.schedule("0 */6 * * *", async () => {
 cron.schedule("0 */4 * * *", async () => {
   try {
     console.log("📦 Checking low stock products...");
-
     const lowStock = await db.query(
       `SELECT p.id, p.name, p.stock_quantity, s.id as seller_id, s.user_id
        FROM products p
@@ -381,7 +365,6 @@ cron.schedule("0 */4 * * *", async () => {
 cron.schedule("0 * * * *", async () => {
   try {
     console.log("🎯 Processing daily login bonuses...");
-
     // Find users who logged in today but haven't received points yet
     const activeUsers = await db.query(
       `SELECT DISTINCT user_id
@@ -438,10 +421,3 @@ console.log("  • Low stock alerts: Every 4 hours");
 console.log("  • Daily login bonus: Every hour");
 
 // Export functions for manual triggering
-module.exports = {
-  checkPriceDrops: notificationsController.checkPriceDrops,
-  checkRestockAlerts: notificationsController.checkRestockAlerts,
-  notifyFlashSaleStart: flashSalesController.notifyFlashSaleStart,
-  endExpiredFlashSales: flashSalesController.endExpiredFlashSales,
-  startScheduledFlashSales: flashSalesController.startScheduledFlashSales,
-};
