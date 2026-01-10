@@ -2,17 +2,21 @@
 const { Pool } = require("pg");
 require("dotenv").config();
 
+// Check if connecting to Railway
+const isRailway = process.env.DATABASE_URL?.includes("railway.app");
+const isProduction = process.env.NODE_ENV === "production";
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl:
-    process.env.NODE_ENV === "production"
+    isProduction || isRailway
       ? {
           rejectUnauthorized: false,
         }
       : false,
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000,
 });
 
 pool.on("error", (err) => {
