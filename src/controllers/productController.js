@@ -119,7 +119,7 @@ exports.getProductDetails = async (req, res) => {
     };
 
     // Cache for 1 hour
-    // await redis.setEx(`product:${id}`, 3600, JSON.stringify(result));
+    // await redis.setex(`product:${id}`, 3600, JSON.stringify(result));
     await redis.setex(`product:${id}`, 3600, JSON.stringify(result));
 
     res.json(result);
@@ -181,7 +181,7 @@ exports.trackView = async (req, res) => {
 
     if (product.rows.length > 0) {
       // Cache user view for personalization
-      await redis.setEx(
+      await redis.setex(
         `user_view:${userId}:${id}`,
         86400,
         product.rows[0].category

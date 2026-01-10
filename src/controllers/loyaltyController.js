@@ -79,7 +79,7 @@ exports.getLoyaltyAccount = async (req, res) => {
     };
 
     // Cache for 5 minutes
-    await redis.setEx(cacheKey, 300, JSON.stringify(result));
+    await redis.setex(cacheKey, 300, JSON.stringify(result));
 
     res.json(result);
   } catch (error) {

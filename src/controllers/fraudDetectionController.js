@@ -296,7 +296,7 @@ async function analyzeDevice(userId, ipAddress, userAgent) {
     factors.push("New device detected");
 
     // Store device
-    await redis.setEx(deviceKey, 90 * 24 * 60 * 60, "1"); // 90 days
+    await redis.setex(deviceKey, 90 * 24 * 60 * 60, "1"); // 90 days
   }
 
   // Multiple users from same IP

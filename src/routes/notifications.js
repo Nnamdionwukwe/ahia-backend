@@ -65,7 +65,7 @@ router.get("/unread-count", authenticateToken, async (req, res) => {
     const count = parseInt(result.rows[0].count);
 
     // Cache for 1 minute
-    await redis.setEx(`unread_count:${userId}`, 60, count.toString());
+    await redis.setex(`unread_count:${userId}`, 60, count.toString());
 
     res.json({ count });
   } catch (error) {

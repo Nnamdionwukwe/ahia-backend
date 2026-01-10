@@ -69,7 +69,7 @@ exports.getWishlist = async (req, res) => {
     );
 
     // Cache for 1 hour
-    await redis.setEx(
+    await redis.setex(
       `wishlist:${userId}`,
       3600,
       JSON.stringify(wishlist.rows)

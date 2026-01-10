@@ -150,7 +150,7 @@ exports.getActiveFlashSales = async (req, res) => {
     const result = { flashSales: flashSales.rows };
 
     // Cache for 1 minute (flash sales change frequently)
-    await redis.setEx(cacheKey, 60, JSON.stringify(result));
+    await redis.setex(cacheKey, 60, JSON.stringify(result));
 
     res.json(result);
   } catch (error) {

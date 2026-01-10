@@ -261,7 +261,7 @@ exports.autocomplete = async (req, res) => {
     };
 
     // Cache for 5 minutes
-    await redis.setEx(cacheKey, 300, JSON.stringify(suggestions));
+    await redis.setex(cacheKey, 300, JSON.stringify(suggestions));
 
     res.json(suggestions);
   } catch (error) {

@@ -335,7 +335,7 @@ exports.setTyping = async (req, res) => {
 
       // Set expiring key for typing status
       if (isTyping) {
-        await redis.setEx(
+        await redis.setex(
           `chat:typing:${conversationId}:${userId}`,
           3, // 3 seconds
           "1"

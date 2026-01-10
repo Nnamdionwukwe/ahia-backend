@@ -91,7 +91,7 @@ exports.getCart = async (req, res) => {
     };
 
     // Cache for 1 hour
-    await redis.setEx(`cart:${userId}`, 3600, JSON.stringify(cart));
+    await redis.setex(`cart:${userId}`, 3600, JSON.stringify(cart));
 
     res.json(cart);
   } catch (error) {
