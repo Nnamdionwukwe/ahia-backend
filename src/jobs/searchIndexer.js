@@ -206,8 +206,9 @@ cron.schedule("0 2 * * *", async () => {
 // Health check - ensure Elasticsearch is available
 async function checkElasticsearchHealth() {
   try {
-    const health = await esClient.cluster.health();
-    console.log(`📊 Elasticsearch health: ${health.status}`);
+    // For Serverless, use ping or index exists instead of cluster health
+    await esClient.ping();
+    console.log(`✅ Elasticsearch connected successfully`);
 
     // Check if index exists
     const indexExists = await esClient.indices.exists({
