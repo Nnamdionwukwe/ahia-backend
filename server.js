@@ -16,13 +16,13 @@ const reviewRoutes = require("./src/routes/reviews");
 const orderRoutes = require("./src/routes/orders");
 const wishlistRoutes = require("./src/routes/wishlist");
 
-// // Import Phase 5 routes
-// const searchRoutes = require("./src/routes/search");
-// // const chatRoutes = require("./src/routes/chat");
-// const loyaltyRoutes = require("./src/routes/loyalty");
-// const fraudRoutes = require("./src/routes/fraud");
-// const notificationsRoutes = require("./src/routes/notifications");
-// const analyticsRoutes = require("./src/routes/analytics");
+// Import Phase 5 routes
+const searchRoutes = require("./src/routes/search");
+const chatRoutes = require("./src/routes/chat");
+const loyaltyRoutes = require("./src/routes/loyalty");
+const fraudRoutes = require("./src/routes/fraud");
+const notificationsRoutes = require("./src/routes/notifications");
+const analyticsRoutes = require("./src/routes/analytics");
 
 const app = express();
 
@@ -120,13 +120,13 @@ app.use("/api/wishlist", wishlistRoutes);
 
 // =============================================
 // PHASE 5 ROUTES
-// // =============================================
-// app.use("/api/search", searchRoutes);
-// app.use("/api/chat", chatRoutes);
-// app.use("/api/loyalty", loyaltyRoutes);
-// app.use("/api/fraud", fraudRoutes);
-// app.use("/api/notifications", notificationsRoutes);
-// app.use("/api/analytics", analyticsRoutes);
+// =============================================
+app.use("/api/search", searchRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/loyalty", loyaltyRoutes);
+app.use("/api/fraud", fraudRoutes);
+app.use("/api/notifications", notificationsRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 // =============================================
 // BACKGROUND JOBS (only in production/non-test)
