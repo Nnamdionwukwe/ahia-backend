@@ -66,7 +66,10 @@ exports.register = async (req, res) => {
 
     const { accessToken, refreshToken } = generateTokens(user.rows[0].id);
 
-    await redis.setEx(`refresh_token:${user.rows[0].id}`, 604800, refreshToken);
+    // Fixed: Use set with EX option instead of setEx
+    await redis.set(`refresh_token:${user.rows[0].id}`, refreshToken, {
+      EX: 604800, // 7 days in seconds
+    });
 
     res.status(201).json({
       success: true,
@@ -122,7 +125,10 @@ exports.login = async (req, res) => {
 
     const { accessToken, refreshToken } = generateTokens(userData.id);
 
-    await redis.setEx(`refresh_token:${userData.id}`, 604800, refreshToken);
+    // Fixed: Use set with EX option instead of setEx
+    await redis.set(`refresh_token:${userData.id}`, refreshToken, {
+      EX: 604800, // 7 days in seconds
+    });
 
     res.json({
       success: true,
@@ -197,7 +203,10 @@ exports.googleVerify = async (req, res) => {
 
     const { accessToken, refreshToken } = generateTokens(user.rows[0].id);
 
-    await redis.setEx(`refresh_token:${user.rows[0].id}`, 604800, refreshToken);
+    // Fixed: Use set with EX option instead of setEx
+    await redis.set(`refresh_token:${user.rows[0].id}`, refreshToken, {
+      EX: 604800, // 7 days in seconds
+    });
 
     res.json({
       success: true,
