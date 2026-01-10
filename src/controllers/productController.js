@@ -119,7 +119,8 @@ exports.getProductDetails = async (req, res) => {
     };
 
     // Cache for 1 hour
-    await redis.setEx(`product:${id}`, 3600, JSON.stringify(result));
+    // await redis.setEx(`product:${id}`, 3600, JSON.stringify(result));
+    await redis.setex(`product:${id}`, 3600, JSON.stringify(result));
 
     res.json(result);
   } catch (error) {

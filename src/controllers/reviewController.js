@@ -95,7 +95,8 @@ exports.getReviews = async (req, res) => {
     };
 
     // Cache for 1 hour
-    await redis.setEx(cacheKey, 3600, JSON.stringify(result));
+    // await redis.setEx(cacheKey, 3600, JSON.stringify(result));
+    await redis.setex(cacheKey, 3600, JSON.stringify(result));
 
     res.json(result);
   } catch (error) {
