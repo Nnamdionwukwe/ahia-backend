@@ -11,14 +11,14 @@ const loyaltyController = require("../controllers/loyaltyController");
 // =============================================
 
 // Check for price drops every hour
-cron.schedule("0 * * * *", async () => {
-  console.log("📊 Running price drop check...");
-  try {
-    await notificationsController.checkPriceDrops();
-  } catch (error) {
-    console.error("Price drop check error:", error);
-  }
-});
+// cron.schedule("0 * * * *", async () => {
+//   console.log("📊 Running price drop check...");
+//   try {
+//     await notificationsController.checkPriceDrops();
+//   } catch (error) {
+//     console.error("Price drop check error:", error);
+//   }
+// });
 
 // Check for restocks every 2 hours
 cron.schedule("0 */2 * * *", async () => {

@@ -1,44 +1,33 @@
 {
   "name": "ahia-backend",
   "version": "1.0.0",
-  "description": "AHIA Clone Backend - Phase 1",
-  "main": "index.js",
+  "description": "AHIA Clone Backend",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "migrate": "node src/database/migrations.js",
-    "migrate-phase2": "node src/database/migrations-phase2.js",
-    "migrate-phase3": "node src/database/migrations-phase3.js",
-    "seed": "node src/database/seed.js",
-    "seed-phase2": "node src/database/seed-phase2.js"
+    "test": "jest"
   },
-  "keywords": [
-    "ahia",
-    "ecommerce"
-  ],
-  "author": "GESTech Solutions",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "@elastic/elasticsearch": "^9.2.0",
-    "bcrypt": "^6.0.0",
+    "@elastic/elasticsearch": "^8.11.0",
+    "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "google-auth-library": "^10.5.0",
-    "helmet": "^8.1.0",
-    "ioredis": "^5.9.1",
-    "jsonwebtoken": "^9.0.3",
-    "node-cron": "^4.2.1",
-    "postgresql": "^0.0.1",
-    "redis": "^5.10.0",
-    "uuid": "^13.0.0"
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "google-auth-library": "^9.4.1",
+    "helmet": "^7.1.0",
+    "ioredis": "^5.3.2",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "pg": "^8.16.3",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "jest": "^30.2.0",
-    "nodemon": "^3.1.11",
-    "pg": "^8.16.3",
-    "supertest": "^7.2.2"
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=18.x"
   }
 }
