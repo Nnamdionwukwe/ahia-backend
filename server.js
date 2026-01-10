@@ -29,17 +29,35 @@ const app = express();
 
 // Middleware
 app.use(helmet());
+
 app.use(
   cors({
-    origin: [
-      "https://ahia-frontend-git-main-nnamdi-michaels-projects.vercel.app",
-      "https://ahia-backend-production.up.railway.app",
-      "http://localhost:3000",
-      "http://localhost:5173",
-      "http://localhost:3001",
-      "http://localhost:5001",
-    ],
+    origin: function (origin, callback) {
+      // Allow requests with no origin (mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+
+      const allowedOrigins = [
+        "https://ahia-frontend.vercel.app",
+        "https://ahia-backend-production.up.railway.app",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:3001",
+        "http://localhost:5001",
+      ];
+
+      // Allow any Vercel preview deployment
+      const isVercelPreview =
+        origin.includes("ahia-frontend") && origin.includes("vercel.app");
+
+      if (allowedOrigins.includes(origin) || isVercelPreview) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
