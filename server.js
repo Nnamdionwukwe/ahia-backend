@@ -27,8 +27,23 @@ const analyticsRoutes = require("./src/routes/analytics");
 
 const app = express();
 
-// Middleware
-app.use(helmet());
+// Middleware - Configure Helmet with proper settings
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+  })
+);
+
+// CORS Configuration
+const allowedOrigins = [
+  "https://ahia-frontend.vercel.app",
+  "https://ahia-backend-production.up.railway.app",
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://localhost:3001",
+  "http://localhost:5001",
+];
 
 app.use(
   cors({
@@ -36,20 +51,15 @@ app.use(
       // Allow requests with no origin (mobile apps, Postman, etc.)
       if (!origin) return callback(null, true);
 
-      const allowedOrigins = [
-        "https://ahia-frontend.vercel.app",
-        "https://ahia-backend-production.up.railway.app",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:3001",
-        "http://localhost:5001",
-      ];
-
-      // Allow any Vercel preview deployment
-      const isVercelPreview =
-        origin.includes("ahia-frontend") && origin.includes("vercel.app");
-
-      if (allowedOrigins.includes(origin) || isVercelPreview) {
+      // Check if origin is in allowed list
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      }
+      // Allow any Vercel deployment preview
+      else if (
+        origin.includes("vercel.app") &&
+        origin.includes("ahia-frontend")
+      ) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
@@ -57,9 +67,16 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    exposedHeaders: ["Content-Range", "X-Content-Range"],
+    maxAge: 600, // 10 minutes
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   })
 );
+
+// Handle preflight requests explicitly
+app.options("*", cors());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
