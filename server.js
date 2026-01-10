@@ -4,30 +4,9 @@ const cors = require("cors");
 const helmet = require("helmet");
 require("dotenv").config();
 
-// Import config
-const db = require("./src/config/database");
-const redis = require("./src/config/redis");
-
-// Import Phase 1-4 routes
-const authRoutes = require("./src/routes/auth");
-const productRoutes = require("./src/routes/products");
-const cartRoutes = require("./src/routes/cart");
-const reviewRoutes = require("./src/routes/reviews");
-const orderRoutes = require("./src/routes/orders");
-const wishlistRoutes = require("./src/routes/wishlist");
-const flashSalesRoutes = require("./src/routes/flashSales");
-
-// Import Phase 5 routes
-const searchRoutes = require("./src/routes/search");
-const chatRoutes = require("./src/routes/chat");
-const loyaltyRoutes = require("./src/routes/loyalty");
-const fraudRoutes = require("./src/routes/fraud");
-const notificationsRoutes = require("./src/routes/notifications");
-const analyticsRoutes = require("./src/routes/analytics");
-
 const app = express();
 
-// Middleware - Configure Helmet with proper settings
+// Middleware FIRST - before any imports that might fail
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -48,15 +27,10 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (mobile apps, Postman, etc.)
       if (!origin) return callback(null, true);
-
-      // Check if origin is in allowed list
       if (allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
-      }
-      // Allow any Vercel deployment preview
-      else if (
+      } else if (
         origin.includes("vercel.app") &&
         origin.includes("ahia-frontend")
       ) {
@@ -69,60 +43,32 @@ app.use(
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     exposedHeaders: ["Content-Range", "X-Content-Range"],
-    maxAge: 600, // 10 minutes
+    maxAge: 600,
     preflightContinue: false,
     optionsSuccessStatus: 204,
   })
 );
 
-// Handle preflight requests explicitly
 app.options("*", cors());
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
+// Request logging
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
-// Health check
-app.get("/health", async (req, res) => {
-  try {
-    const dbCheck = await db.query("SELECT NOW()");
-
-    // Check Elasticsearch if available
-    let elasticsearchStatus = "not configured";
-    try {
-      const { Client } = require("@elastic/elasticsearch");
-      const esClient = new Client({
-        node: process.env.ELASTICSEARCH_URL || "http://localhost:9200",
-      });
-      await esClient.ping();
-      elasticsearchStatus = "connected";
-    } catch (e) {
-      elasticsearchStatus = "disconnected";
-    }
-
-    res.json({
-      status: "healthy",
-      database: "connected",
-      redis: redis.isOpen ? "connected" : "disconnected",
-      elasticsearch: elasticsearchStatus,
-      timestamp: new Date().toISOString(),
-      phase: 5,
-      version: "1.0.0",
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "unhealthy",
-      error: error.message,
-    });
-  }
+// Basic health check FIRST - no dependencies
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    version: "1.0.0",
+  });
 });
 
-// API documentation endpoint
+// API documentation
 app.get("/api", (req, res) => {
   res.json({
     message: "E-commerce API - Phase 5",
@@ -139,38 +85,114 @@ app.get("/api", (req, res) => {
       loyalty: "/api/loyalty",
       notifications: "/api/notifications",
       analytics: "/api/analytics",
-      fraud: "/api/fraud (admin only)",
     },
-    documentation: "https://your-docs-url.com",
   });
 });
 
-// =============================================
-// PHASE 1-4 ROUTES
-// =============================================
-app.use("/api/auth", authRoutes);
-app.use("/api/products", productRoutes);
-app.use("/api/cart", cartRoutes);
-app.use("/api/reviews", reviewRoutes);
-app.use("/api/orders", orderRoutes);
-app.use("/api/wishlist", wishlistRoutes);
-app.use("/api/flash-sales", flashSalesRoutes);
+// Try to load database and redis (with error handling)
+let db, redis;
+try {
+  db = require("./src/config/database");
+  redis = require("./src/config/redis");
+  console.log("✅ Database and Redis configs loaded");
+} catch (error) {
+  console.error("⚠️  Database/Redis config failed:", error.message);
+}
 
-// =============================================
-// PHASE 5 ROUTES
-// =============================================
-app.use("/api/search", searchRoutes);
-app.use("/api/chat", chatRoutes);
-app.use("/api/loyalty", loyaltyRoutes);
-app.use("/api/fraud", fraudRoutes);
-app.use("/api/notifications", notificationsRoutes);
-app.use("/api/analytics", analyticsRoutes);
+// Enhanced health check with DB/Redis if available
+app.get("/health/full", async (req, res) => {
+  try {
+    let dbStatus = "not available";
+    let redisStatus = "not available";
+    let elasticsearchStatus = "not configured";
 
-// =============================================
-// BACKGROUND JOBS (only in production/non-test)
-// =============================================
+    if (db) {
+      try {
+        await db.query("SELECT NOW()");
+        dbStatus = "connected";
+      } catch (e) {
+        dbStatus = "error: " + e.message;
+      }
+    }
+
+    if (redis) {
+      redisStatus = redis.isOpen ? "connected" : "disconnected";
+    }
+
+    if (process.env.ELASTICSEARCH_URL) {
+      try {
+        const { Client } = require("@elastic/elasticsearch");
+        const esClient = new Client({
+          node: process.env.ELASTICSEARCH_URL,
+        });
+        await esClient.ping();
+        elasticsearchStatus = "connected";
+      } catch (e) {
+        elasticsearchStatus = "error: " + e.message;
+      }
+    }
+
+    res.json({
+      status: "healthy",
+      database: dbStatus,
+      redis: redisStatus,
+      elasticsearch: elasticsearchStatus,
+      timestamp: new Date().toISOString(),
+      phase: 5,
+      version: "1.0.0",
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "unhealthy",
+      error: error.message,
+    });
+  }
+});
+
+// Load routes with error handling
+let routes = {};
+const routeFiles = [
+  { path: "/api/auth", file: "./src/routes/auth", name: "auth" },
+  { path: "/api/products", file: "./src/routes/products", name: "products" },
+  { path: "/api/cart", file: "./src/routes/cart", name: "cart" },
+  { path: "/api/reviews", file: "./src/routes/reviews", name: "reviews" },
+  { path: "/api/orders", file: "./src/routes/orders", name: "orders" },
+  { path: "/api/wishlist", file: "./src/routes/wishlist", name: "wishlist" },
+  {
+    path: "/api/flash-sales",
+    file: "./src/routes/flashSales",
+    name: "flashSales",
+  },
+  { path: "/api/search", file: "./src/routes/search", name: "search" },
+  { path: "/api/chat", file: "./src/routes/chat", name: "chat" },
+  { path: "/api/loyalty", file: "./src/routes/loyalty", name: "loyalty" },
+  { path: "/api/fraud", file: "./src/routes/fraud", name: "fraud" },
+  {
+    path: "/api/notifications",
+    file: "./src/routes/notifications",
+    name: "notifications",
+  },
+  {
+    path: "/api/analytics",
+    file: "./src/routes/analytics",
+    name: "analytics",
+  },
+];
+
+routeFiles.forEach(({ path, file, name }) => {
+  try {
+    const route = require(file);
+    app.use(path, route);
+    routes[name] = "loaded";
+    console.log(`✅ ${name} routes loaded`);
+  } catch (error) {
+    routes[name] = "failed: " + error.message;
+    console.error(`❌ Failed to load ${name} routes:`, error.message);
+  }
+});
+
+// Background jobs (only if not in test mode)
 if (process.env.NODE_ENV !== "test") {
-  // Start background job schedulers
   try {
     require("./src/jobs/scheduler");
     console.log("✅ Background jobs initialized");
@@ -178,7 +200,6 @@ if (process.env.NODE_ENV !== "test") {
     console.warn("⚠️  Background jobs not available:", error.message);
   }
 
-  // Start Elasticsearch indexer (if configured)
   if (process.env.ELASTICSEARCH_URL) {
     try {
       require("./src/jobs/searchIndexer");
@@ -202,7 +223,6 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error("Error:", err);
 
-  // Don't expose internal errors in production
   const message =
     process.env.NODE_ENV === "production"
       ? "Internal server error"
@@ -216,7 +236,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5001;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log("\n🚀 E-commerce API Server");
   console.log("━".repeat(50));
   console.log(`📍 Server:        http://localhost:${PORT}`);
@@ -224,34 +244,52 @@ app.listen(PORT, () => {
   console.log(`📚 API Docs:      http://localhost:${PORT}/api`);
   console.log("━".repeat(50));
   console.log(`🌍 Environment:   ${process.env.NODE_ENV || "development"}`);
-  console.log(`📊 Database:      ${process.env.DB_HOST || "localhost"}`);
-  console.log(`🔴 Redis:         ${process.env.REDIS_HOST || "localhost"}`);
-  console.log(
-    `🔍 Elasticsearch: ${process.env.ELASTICSEARCH_URL || "not configured"}`
-  );
   console.log("━".repeat(50));
-  console.log("\n✨ Phase 5 Features Active:");
-  console.log("   • Advanced Search with Elasticsearch");
-  console.log("   • Real-time Chat Support");
-  console.log("   • Loyalty & Rewards Program");
-  console.log("   • Fraud Detection System");
-  console.log("   • Advanced Analytics");
-  console.log("   • Real-time Notifications\n");
+  console.log("\n📦 Loaded Routes:");
+  Object.entries(routes).forEach(([name, status]) => {
+    console.log(`   ${status === "loaded" ? "✅" : "❌"} ${name}: ${status}`);
+  });
+  console.log("\n");
 });
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
-  console.log("\n🛑 SIGTERM signal received: closing HTTP server");
+  console.log("\n🛑 SIGTERM signal received");
 
-  // Close database connections
-  await db.pool.end();
-  console.log("✅ Database connections closed");
+  server.close(() => {
+    console.log("✅ HTTP server closed");
+  });
 
-  // Close Redis connection
-  await redis.quit();
-  console.log("✅ Redis connection closed");
+  if (db && db.pool) {
+    try {
+      await db.pool.end();
+      console.log("✅ Database connections closed");
+    } catch (e) {
+      console.error("Error closing database:", e.message);
+    }
+  }
+
+  if (redis) {
+    try {
+      await redis.quit();
+      console.log("✅ Redis connection closed");
+    } catch (e) {
+      console.error("Error closing Redis:", e.message);
+    }
+  }
 
   process.exit(0);
 });
 
-module.exports = app; // For testing
+// Catch uncaught errors
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception:", error);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+  process.exit(1);
+});
+
+module.exports = app;
