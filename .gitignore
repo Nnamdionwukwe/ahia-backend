@@ -14,3 +14,4 @@ Add this inside:
 node_modules/
 .env
 .DS_Store.env
+node_modules/
