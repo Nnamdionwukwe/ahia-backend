@@ -6,6 +6,10 @@ async function seedProducts() {
   try {
     console.log("🌱 Seeding products to Railway database...");
 
+    // Check what's already there
+    const existing = await db.query("SELECT COUNT(*) FROM products");
+    console.log(`📊 Products before seeding: ${existing.rows[0].count}`);
+
     const result = await db.query(`
       INSERT INTO products (
         id, name, description, price, original_price, discount_percentage,
@@ -38,8 +42,22 @@ async function seedProducts() {
       console.log(`      Category: ${product.category}\n`);
     });
 
+    // Verify total count
+    const afterCount = await db.query("SELECT COUNT(*) FROM products");
+    console.log(`📊 Total products after seeding: ${afterCount.rows[0].count}`);
+
+    // List all products
+    const allProducts = await db.query(
+      "SELECT id, name, price, category FROM products ORDER BY created_at DESC"
+    );
+    console.log("\n📋 ALL PRODUCTS IN DATABASE:");
+    allProducts.rows.forEach((p, index) => {
+      console.log(`   ${index + 1}. ${p.name} - $${p.price} (${p.category})`);
+      console.log(`      ID: ${p.id}`);
+    });
+
     await db.pool.end();
-    console.log("🎉 Seeding complete!");
+    console.log("\n🎉 Seeding complete!");
     process.exit(0);
   } catch (error) {
     console.error("❌ Error seeding products:", error.message);
