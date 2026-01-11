@@ -97,13 +97,25 @@ exports.getProductDetails = async (req, res) => {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    const images = await db.query(
+    // Check if images exist in product_images table
+    const productImagesQuery = await db.query(
       `SELECT image_url, alt_text, display_order
        FROM product_images
        WHERE product_id = $1
        ORDER BY display_order ASC`,
       [id]
     );
+
+    // If no images in product_images table, use images from products.images column
+    let images = productImagesQuery.rows;
+    if (images.length === 0 && product.rows[0].images) {
+      // Convert the images array from products table to the expected format
+      images = product.rows[0].images.map((url, index) => ({
+        image_url: url,
+        alt_text: product.rows[0].name,
+        display_order: index + 1,
+      }));
+    }
 
     const variants = await db.query(
       `SELECT id, color, size, sku, stock_quantity, base_price, discount_percentage
@@ -114,7 +126,7 @@ exports.getProductDetails = async (req, res) => {
 
     const result = {
       product: product.rows[0],
-      images: images.rows,
+      images: images,
       variants: variants.rows,
     };
 
