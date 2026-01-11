@@ -79,11 +79,11 @@ exports.getProductDetails = async (req, res) => {
     const { id } = req.params;
 
     // Try cache first
-    // const cacheKey = `product:${id}`;
-    // const cached = await redis.get(cacheKey);
-    // if (cached) {
-    //   return res.json(JSON.parse(cached));
-    // }
+    const cacheKey = `product:${id}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.json(JSON.parse(cached));
+    }
 
     const product = await db.query(
       `SELECT p.*, s.store_name, s.rating as seller_rating, s.total_followers, s.verified
