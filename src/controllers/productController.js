@@ -74,22 +74,22 @@ exports.getProducts = async (req, res) => {
   }
 };
 
-// Get product details
 exports.getProductDetails = async (req, res) => {
   try {
     const { id } = req.params;
 
     // Try cache first
-    const cached = await redis.get(`product:${id}`);
+    const cacheKey = `product:${id}`;
+    const cached = await redis.get(cacheKey);
     if (cached) {
       return res.json(JSON.parse(cached));
     }
 
     const product = await db.query(
       `SELECT p.*, s.store_name, s.rating as seller_rating, s.total_followers, s.verified
-             FROM products p
-             LEFT JOIN sellers s ON p.seller_id = s.id
-             WHERE p.id = $1`,
+       FROM products p
+       LEFT JOIN sellers s ON p.seller_id = s.id
+       WHERE p.id = $1`,
       [id]
     );
 
@@ -99,16 +99,16 @@ exports.getProductDetails = async (req, res) => {
 
     const images = await db.query(
       `SELECT image_url, alt_text, display_order
-             FROM product_images
-             WHERE product_id = $1
-             ORDER BY display_order ASC`,
+       FROM product_images
+       WHERE product_id = $1
+       ORDER BY display_order ASC`,
       [id]
     );
 
     const variants = await db.query(
       `SELECT id, color, size, sku, stock_quantity, base_price, discount_percentage
-             FROM product_variants
-             WHERE product_id = $1`,
+       FROM product_variants
+       WHERE product_id = $1`,
       [id]
     );
 
@@ -119,8 +119,7 @@ exports.getProductDetails = async (req, res) => {
     };
 
     // Cache for 1 hour
-    // await redis.setex(`product:${id}`, 3600, JSON.stringify(result));
-    await redis.setex(`product:${id}`, 3600, JSON.stringify(result));
+    await redis.setex(cacheKey, 3600, JSON.stringify(result));
 
     res.json(result);
   } catch (error) {
@@ -128,7 +127,6 @@ exports.getProductDetails = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch product" });
   }
 };
-
 // Search products (basic - full Elasticsearch in later phases)
 exports.searchProducts = async (req, res) => {
   try {
