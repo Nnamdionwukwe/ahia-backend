@@ -11,6 +11,7 @@ app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    crossOriginEmbedderPolicy: false, // Allow Google OAuth embedding
   })
 );
 
@@ -236,14 +237,15 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5001;
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   console.log("\n🚀 E-commerce API Server");
   console.log("━".repeat(50));
-  console.log(`📍 Server:        http://localhost:${PORT}`);
-  console.log(`🏥 Health Check:  http://localhost:${PORT}/health`);
-  console.log(`📚 API Docs:      http://localhost:${PORT}/api`);
+  console.log(`📍 Server:        http://0.0.0.0:${PORT}`);
+  console.log(`🏥 Health Check:  http://0.0.0.0:${PORT}/health`);
+  console.log(`📚 API Docs:      http://0.0.0.0:${PORT}/api`);
   console.log("━".repeat(50));
   console.log(`🌍 Environment:   ${process.env.NODE_ENV || "development"}`);
+  console.log(`🔌 Port:          ${PORT}`);
   console.log("━".repeat(50));
   console.log("\n📦 Loaded Routes:");
   Object.entries(routes).forEach(([name, status]) => {
