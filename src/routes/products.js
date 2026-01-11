@@ -6,6 +6,8 @@ const { authenticateUser } = require("../middleware/auth"); // ADD THIS LINE
 router.get("/", productController.getProducts);
 router.get("/:id/details", productController.getProductDetails);
 router.get("/search", productController.searchProducts);
+router.get("/brands", productController.getBrands);
+router.get("/tags", productController.getTags);
 router.post("/:id/view", authenticateUser, productController.trackView);
 
 // Temporary endpoint to clear product cache
