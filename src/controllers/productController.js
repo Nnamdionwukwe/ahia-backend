@@ -77,6 +77,84 @@ exports.getProducts = async (req, res) => {
 };
 
 // Add this to getProductDetails function
+// exports.getProductDetails = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     const cacheKey = `product:${id}`;
+//     const cached = await redis.get(cacheKey);
+//     if (cached) {
+//       return res.json(JSON.parse(cached));
+//     }
+
+//     const product = await db.query(
+//       `SELECT p.*, s.store_name, s.rating as seller_rating, s.total_followers, s.verified
+//        FROM products p
+//        LEFT JOIN sellers s ON p.seller_id = s.id
+//        WHERE p.id = $1`,
+//       [id]
+//     );
+
+//     if (product.rows.length === 0) {
+//       return res.status(404).json({ error: "Product not found" });
+//     }
+
+//     const productData = product.rows[0];
+
+//     const images =
+//       productData.images && Array.isArray(productData.images)
+//         ? productData.images.map((url, index) => ({
+//             image_url: url,
+//             alt_text: productData.name,
+//             display_order: index + 1,
+//           }))
+//         : [];
+
+//     const variants = await db.query(
+//       `SELECT id, color, size, sku, stock_quantity, base_price, discount_percentage
+//        FROM product_variants
+//        WHERE product_id = $1`,
+//       [id]
+//     );
+
+//     // Get product attributes grouped by category
+//     const attributes = await db.query(
+//       `SELECT attribute_name, attribute_value, attribute_group, display_order
+//        FROM product_attributes
+//        WHERE product_id = $1
+//        ORDER BY attribute_group, display_order`,
+//       [id]
+//     );
+
+//     // Group attributes by category
+//     const groupedAttributes = attributes.rows.reduce((acc, attr) => {
+//       const group = attr.attribute_group || "other";
+//       if (!acc[group]) {
+//         acc[group] = [];
+//       }
+//       acc[group].push({
+//         name: attr.attribute_name,
+//         value: attr.attribute_value,
+//       });
+//       return acc;
+//     }, {});
+
+//     const result = {
+//       product: productData,
+//       images: images,
+//       variants: variants.rows,
+//       attributes: groupedAttributes,
+//     };
+
+//     await redis.set(cacheKey, JSON.stringify(result), "EX", 3600);
+
+//     res.json(result);
+//   } catch (error) {
+//     console.error("Get product details error:", error);
+//     res.status(500).json({ error: "Failed to fetch product" });
+//   }
+// };
+
 exports.getProductDetails = async (req, res) => {
   try {
     const { id } = req.params;
@@ -110,10 +188,12 @@ exports.getProductDetails = async (req, res) => {
           }))
         : [];
 
+    // Updated variants query to include image_url for each color
     const variants = await db.query(
-      `SELECT id, color, size, sku, stock_quantity, base_price, discount_percentage
+      `SELECT id, color, size, sku, stock_quantity, base_price, discount_percentage, image_url
        FROM product_variants
-       WHERE product_id = $1`,
+       WHERE product_id = $1
+       ORDER BY color, CAST(size AS DECIMAL)`,
       [id]
     );
 
