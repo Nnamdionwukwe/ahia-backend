@@ -86,6 +86,8 @@ app.get("/api", (req, res) => {
       loyalty: "/api/loyalty",
       notifications: "/api/notifications",
       analytics: "/api/analytics",
+      flashSales: "/api/flash-sales",
+      seasonalSales: "/api/seasonal-sales",
     },
   });
 });
@@ -177,6 +179,12 @@ const routeFiles = [
     path: "/api/analytics",
     file: "./src/routes/analytics",
     name: "analytics",
+  },
+  // ADD SALES ROUTES HERE
+  {
+    path: "/api",
+    file: "./src/routes/sales",
+    name: "sales",
   },
 ];
 
