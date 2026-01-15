@@ -158,9 +158,9 @@ exports.getProducts = async (req, res) => {
 exports.getProductDetails = async (req, res) => {
   try {
     const { id } = req.params;
-
     const cacheKey = `product:${id}`;
     const cached = await redis.get(cacheKey);
+
     if (cached) {
       return res.json(JSON.parse(cached));
     }
@@ -179,6 +179,7 @@ exports.getProductDetails = async (req, res) => {
 
     const productData = product.rows[0];
 
+    // Map product images
     const images =
       productData.images && Array.isArray(productData.images)
         ? productData.images.map((url, index) => ({
@@ -188,7 +189,7 @@ exports.getProductDetails = async (req, res) => {
           }))
         : [];
 
-    // Query variants with all fields including image_url
+    // Query variants WITHOUT image_url (it doesn't exist in the table)
     const variants = await db.query(
       `SELECT 
         id, 
@@ -197,8 +198,7 @@ exports.getProductDetails = async (req, res) => {
         sku, 
         stock_quantity, 
         COALESCE(base_price, $2) as base_price,
-        COALESCE(discount_percentage, 0) as discount_percentage,
-        image_url
+        COALESCE(discount_percentage, 0) as discount_percentage
       FROM product_variants
       WHERE product_id = $1
       ORDER BY 
@@ -211,14 +211,17 @@ exports.getProductDetails = async (req, res) => {
       [id, productData.price]
     );
 
-    // Map product images to variants if they don't have their own images
+    // Map product images to variants based on color matching
     const variantsWithImages = variants.rows.map((variant) => {
-      if (!variant.image_url && images.length > 0) {
-        const uniqueColors = [...new Set(variants.rows.map((v) => v.color))];
-        const colorIndex = uniqueColors.indexOf(variant.color);
-        variant.image_url =
-          images[colorIndex % images.length]?.image_url || images[0]?.image_url;
-      }
+      // Get unique colors to map to images
+      const uniqueColors = [...new Set(variants.rows.map((v) => v.color))];
+      const colorIndex = uniqueColors.indexOf(variant.color);
+
+      // Assign image based on color index
+      variant.image_url =
+        images[colorIndex % images.length]?.image_url ||
+        (images.length > 0 ? images[0].image_url : null);
+
       return variant;
     });
 
@@ -251,8 +254,8 @@ exports.getProductDetails = async (req, res) => {
       attributes: groupedAttributes,
     };
 
+    // Cache for 1 hour
     await redis.set(cacheKey, JSON.stringify(result), "EX", 3600);
-
     res.json(result);
   } catch (error) {
     console.error("Get product details error:", error);
