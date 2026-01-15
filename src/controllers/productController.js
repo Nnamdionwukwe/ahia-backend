@@ -188,14 +188,42 @@ exports.getProductDetails = async (req, res) => {
           }))
         : [];
 
-    // Updated variants query to include image_url for each color
+    // Query variants with all necessary fields
     const variants = await db.query(
-      `SELECT id, color, size, sku, stock_quantity, base_price, discount_percentage, image_url
-       FROM product_variants
-       WHERE product_id = $1
-       ORDER BY color, CAST(size AS DECIMAL)`,
-      [id]
+      `SELECT 
+        id, 
+        color, 
+        size, 
+        sku, 
+        stock_quantity, 
+        COALESCE(base_price, $2) as base_price,
+        COALESCE(discount_percentage, 0) as discount_percentage,
+        image_url
+      FROM product_variants
+      WHERE product_id = $1
+      ORDER BY 
+        color NULLS LAST,
+        CASE 
+          WHEN size ~ '^[0-9]+\.?[0-9]*$' 
+          THEN CAST(size AS DECIMAL)
+          ELSE 999
+        END`,
+      [id, productData.price]
     );
+
+    // Map product images to variants if they don't have their own images
+    const variantsWithImages = variants.rows.map((variant) => {
+      if (!variant.image_url && images.length > 0) {
+        // Get unique colors and find the index
+        const uniqueColors = [...new Set(variants.rows.map((v) => v.color))];
+        const colorIndex = uniqueColors.indexOf(variant.color);
+
+        // Assign an image based on color index
+        variant.image_url =
+          images[colorIndex % images.length]?.image_url || images[0]?.image_url;
+      }
+      return variant;
+    });
 
     // Get product attributes grouped by category
     const attributes = await db.query(
@@ -222,7 +250,7 @@ exports.getProductDetails = async (req, res) => {
     const result = {
       product: productData,
       images: images,
-      variants: variants.rows,
+      variants: variantsWithImages,
       attributes: groupedAttributes,
     };
 
