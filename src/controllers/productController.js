@@ -188,7 +188,7 @@ exports.getProductDetails = async (req, res) => {
           }))
         : [];
 
-    // Query variants with all necessary fields
+    // Query variants with all fields including image_url
     const variants = await db.query(
       `SELECT 
         id, 
@@ -214,11 +214,8 @@ exports.getProductDetails = async (req, res) => {
     // Map product images to variants if they don't have their own images
     const variantsWithImages = variants.rows.map((variant) => {
       if (!variant.image_url && images.length > 0) {
-        // Get unique colors and find the index
         const uniqueColors = [...new Set(variants.rows.map((v) => v.color))];
         const colorIndex = uniqueColors.indexOf(variant.color);
-
-        // Assign an image based on color index
         variant.image_url =
           images[colorIndex % images.length]?.image_url || images[0]?.image_url;
       }
