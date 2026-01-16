@@ -100,9 +100,6 @@
 //   }
 // };
 
-// ============================================
-// 1. BACKEND: wishlistController.js
-// ============================================
 const db = require("../config/database");
 const redis = require("../config/redis");
 const { v4: uuidv4 } = require("uuid");
