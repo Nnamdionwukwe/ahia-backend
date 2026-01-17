@@ -163,7 +163,7 @@ exports.advancedSearch = async (req, res) => {
       highlights: hit.highlight,
     }));
 
-    res.json({
+    const responseData = {
       query: q,
       total: result.hits.total.value,
       products,
@@ -184,15 +184,25 @@ exports.advancedSearch = async (req, res) => {
         total: result.hits.total.value,
         pages: Math.ceil(result.hits.total.value / limit),
       },
-    });
+    };
 
-    // Track search for analytics
+    // Track search for analytics (don't let this break the response)
     if (q) {
-      await trackSearchQuery(q, result.hits.total.value);
+      trackSearchQuery(q, result.hits.total.value).catch((err) => {
+        console.error("Error tracking search query:", err);
+        // Don't throw - tracking failure shouldn't break search
+      });
     }
+
+    // Send response once
+    return res.json(responseData);
   } catch (error) {
     console.error("Advanced search error:", error);
-    res.status(500).json({ error: "Search failed" });
+
+    // Only send error if headers haven't been sent
+    if (!res.headersSent) {
+      return res.status(500).json({ error: "Search failed" });
+    }
   }
 };
 
@@ -547,14 +557,21 @@ exports.reindexAllProducts = async (req, res) => {
 
 // Helper: Track search queries
 async function trackSearchQuery(query, resultCount) {
-  const today = new Date().toISOString().split("T")[0];
+  try {
+    const today = new Date().toISOString().split("T")[0];
 
-  // Store in Redis sorted set for popular searches
-  await redis.zIncrBy(`popular_searches:${today}`, 1, query.toLowerCase());
+    // Store in Redis sorted set for popular searches
+    // FIXED: Use correct Redis command (uppercase)
+    await redis.ZINCRBY(`popular_searches:${today}`, 1, query.toLowerCase());
 
-  // Track search result quality
-  if (resultCount === 0) {
-    await redis.sAdd("zero_result_searches", query.toLowerCase());
+    // Track search result quality
+    if (resultCount === 0) {
+      // FIXED: Use correct Redis command (uppercase)
+      await redis.SADD("zero_result_searches", query.toLowerCase());
+    }
+  } catch (error) {
+    // Log error but don't throw - tracking failure shouldn't break search
+    console.error("Redis tracking error:", error);
   }
 }
 
