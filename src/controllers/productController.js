@@ -2,6 +2,290 @@
 const db = require("../config/database");
 const redis = require("../config/redis");
 
+// Get all products
+exports.getAllProducts = async (req, res) => {
+  try {
+    const {
+      category,
+      page = 1,
+      limit = 20,
+      sort = "created_at",
+      order = "DESC",
+      minPrice,
+      maxPrice,
+      search,
+    } = req.query;
+
+    const offset = (page - 1) * limit;
+    const params = [];
+    let paramCount = 0;
+
+    // Base query
+    let query = `
+      SELECT p.*, 
+             COUNT(*) OVER() as total_count
+      FROM products p
+      WHERE 1=1
+    `;
+
+    // Filters
+    if (category) {
+      paramCount++;
+      params.push(category);
+      query += ` AND p.category = $${paramCount}`;
+    }
+
+    if (minPrice) {
+      paramCount++;
+      params.push(minPrice);
+      query += ` AND p.price >= $${paramCount}`;
+    }
+
+    if (maxPrice) {
+      paramCount++;
+      params.push(maxPrice);
+      query += ` AND p.price <= $${paramCount}`;
+    }
+
+    if (search) {
+      paramCount++;
+      params.push(`%${search}%`);
+      query += ` AND (p.name ILIKE $${paramCount} OR p.description ILIKE $${paramCount})`;
+    }
+
+    // Sorting
+    const validSortFields = ["created_at", "price", "name", "rating"];
+    const validOrders = ["ASC", "DESC"];
+    const sortField = validSortFields.includes(sort) ? sort : "created_at";
+    const sortOrder = validOrders.includes(order.toUpperCase())
+      ? order.toUpperCase()
+      : "DESC";
+
+    query += ` ORDER BY p.${sortField} ${sortOrder}`;
+
+    // Pagination
+    paramCount++;
+    params.push(limit);
+    query += ` LIMIT $${paramCount}`;
+
+    paramCount++;
+    params.push(offset);
+    query += ` OFFSET $${paramCount}`;
+
+    const result = await db.query(query, params);
+
+    res.json({
+      products: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: result.rows[0]?.total_count || 0,
+        pages: Math.ceil((result.rows[0]?.total_count || 0) / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Get all products error:", error);
+    res.status(500).json({ error: "Failed to fetch products" });
+  }
+};
+
+// Get product by ID
+exports.getProductById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check cache
+    const cacheKey = `product:${id}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.json(JSON.parse(cached));
+    }
+
+    const product = await db.query(
+      `SELECT p.*, s.store_name, s.rating as seller_rating
+       FROM products p
+       LEFT JOIN sellers s ON p.seller_id = s.id
+       WHERE p.id = $1`,
+      [id]
+    );
+
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Get variants
+    const variants = await db.query(
+      `SELECT id, color, size, base_price, discount_percentage, stock_quantity
+       FROM product_variants
+       WHERE product_id = $1`,
+      [id]
+    );
+
+    const productData = {
+      ...product.rows[0],
+      variants: variants.rows,
+    };
+
+    // Cache for 5 minutes
+    await redis.setex(cacheKey, 300, JSON.stringify(productData));
+
+    res.json(productData);
+  } catch (error) {
+    console.error("Get product error:", error);
+    res.status(500).json({ error: "Failed to fetch product" });
+  }
+};
+
+// Get product variants
+exports.getProductVariants = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const variants = await db.query(
+      `SELECT id, product_id, color, size, base_price, 
+              discount_percentage, stock_quantity, sku
+       FROM product_variants
+       WHERE product_id = $1 AND stock_quantity >= 0
+       ORDER BY color, size`,
+      [productId]
+    );
+
+    res.json({
+      variants: variants.rows,
+      count: variants.rows.length,
+    });
+  } catch (error) {
+    console.error("Get variants error:", error);
+    res.status(500).json({ error: "Failed to fetch variants" });
+  }
+};
+
+// Get products by category
+exports.getProductsByCategory = async (req, res) => {
+  try {
+    const { category } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+
+    const products = await db.query(
+      `SELECT p.*, COUNT(*) OVER() as total_count
+       FROM products p
+       WHERE p.category = $1
+       ORDER BY p.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [category, limit, offset]
+    );
+
+    res.json({
+      products: products.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: products.rows[0]?.total_count || 0,
+        pages: Math.ceil((products.rows[0]?.total_count || 0) / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Get products by category error:", error);
+    res.status(500).json({ error: "Failed to fetch products" });
+  }
+};
+
+// Create product (Admin)
+exports.createProduct = async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      price,
+      category,
+      images,
+      stock_quantity,
+      seller_id,
+    } = req.body;
+
+    const product = await db.query(
+      `INSERT INTO products 
+       (name, description, price, category, images, stock_quantity, seller_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+       RETURNING *`,
+      [name, description, price, category, images, stock_quantity, seller_id]
+    );
+
+    res.status(201).json({
+      success: true,
+      product: product.rows[0],
+    });
+  } catch (error) {
+    console.error("Create product error:", error);
+    res.status(500).json({ error: "Failed to create product" });
+  }
+};
+
+// Update product (Admin)
+exports.updateProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    const fields = Object.keys(updates)
+      .map((key, index) => `${key} = $${index + 2}`)
+      .join(", ");
+
+    const values = [id, ...Object.values(updates)];
+
+    const product = await db.query(
+      `UPDATE products 
+       SET ${fields}, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      values
+    );
+
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Clear cache
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      product: product.rows[0],
+    });
+  } catch (error) {
+    console.error("Update product error:", error);
+    res.status(500).json({ error: "Failed to update product" });
+  }
+};
+
+// Delete product (Admin)
+exports.deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(
+      "DELETE FROM products WHERE id = $1 RETURNING *",
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Clear cache
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      message: "Product deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete product error:", error);
+    res.status(500).json({ error: "Failed to delete product" });
+  }
+};
+
 // Get all products with filters
 exports.getProducts = async (req, res) => {
   try {
@@ -191,20 +475,20 @@ exports.getProductDetails = async (req, res) => {
 
     // Query variants WITHOUT image_url (it doesn't exist in the table)
     const variants = await db.query(
-      `SELECT 
-        id, 
-        color, 
-        size, 
-        sku, 
-        stock_quantity, 
+      `SELECT
+        id,
+        color,
+        size,
+        sku,
+        stock_quantity,
         COALESCE(base_price, $2) as base_price,
         COALESCE(discount_percentage, 0) as discount_percentage
       FROM product_variants
       WHERE product_id = $1
-      ORDER BY 
+      ORDER BY
         color NULLS LAST,
-        CASE 
-          WHEN size ~ '^[0-9]+\.?[0-9]*$' 
+        CASE
+          WHEN size ~ '^[0-9]+\.?[0-9]*$'
           THEN CAST(size AS DECIMAL)
           ELSE 999
         END`,
@@ -483,5 +767,588 @@ exports.trackView = async (req, res) => {
   } catch (error) {
     console.error("Track view error:", error);
     res.status(500).json({ error: "Failed to track view" });
+  }
+};
+
+// Add at the end of your productController.js file:
+
+// Get product variants
+exports.getProductVariants = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const variants = await db.query(
+      `SELECT id, product_id, color, size, base_price,
+              discount_percentage, stock_quantity, sku
+       FROM product_variants
+       WHERE product_id = $1 AND stock_quantity >= 0
+       ORDER BY color, size`,
+      [productId]
+    );
+
+    res.json({
+      variants: variants.rows,
+      count: variants.rows.length,
+    });
+  } catch (error) {
+    console.error("Get variants error:", error);
+    res.status(500).json({ error: "Failed to fetch variants" });
+  }
+};
+
+// Create product (Admin)
+exports.createProduct = async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      price,
+      original_price,
+      discount_percentage,
+      category,
+      brand,
+      images,
+      stock_quantity,
+      seller_id,
+      tags,
+    } = req.body;
+
+    if (!name || !price || !category) {
+      return res.status(400).json({
+        error: "Name, price, and category are required",
+      });
+    }
+
+    const product = await db.query(
+      `INSERT INTO products
+       (name, description, price, original_price, discount_percentage,
+        category, brand, images, stock_quantity, seller_id, tags,
+        created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+       RETURNING *`,
+      [
+        name,
+        description,
+        price,
+        original_price || price,
+        discount_percentage || 0,
+        category,
+        brand,
+        images || [],
+        stock_quantity || 0,
+        seller_id,
+        tags || [],
+      ]
+    );
+
+    res.status(201).json({
+      success: true,
+      product: product.rows[0],
+      message: "Product created successfully",
+    });
+  } catch (error) {
+    console.error("Create product error:", error);
+    res.status(500).json({ error: "Failed to create product" });
+  }
+};
+
+// Update product (Admin)
+exports.updateProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    delete updates.id;
+    delete updates.created_at;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    const fields = Object.keys(updates);
+    const values = Object.values(updates);
+    const setClause = fields
+      .map((field, index) => `${field} = $${index + 2}`)
+      .join(", ");
+
+    const query = `
+      UPDATE products
+      SET ${setClause}, updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `;
+
+    const product = await db.query(query, [id, ...values]);
+
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      product: product.rows[0],
+      message: "Product updated successfully",
+    });
+  } catch (error) {
+    console.error("Update product error:", error);
+    res.status(500).json({ error: "Failed to update product" });
+  }
+};
+
+// Delete product (Admin)
+exports.deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const product = await db.query("SELECT * FROM products WHERE id = $1", [
+      id,
+    ]);
+
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    await db.query("DELETE FROM products WHERE id = $1", [id]);
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      message: "Product deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete product error:", error);
+    res.status(500).json({ error: "Failed to delete product" });
+  }
+};
+
+// Clear cache (Admin)
+exports.clearCache = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      message: "Cache cleared successfully",
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to clear cache" });
+  }
+};
+
+// Variant Management
+exports.createVariant = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      color,
+      size,
+      sku,
+      stock_quantity,
+      base_price,
+      discount_percentage,
+    } = req.body;
+
+    const product = await db.query("SELECT * FROM products WHERE id = $1", [
+      id,
+    ]);
+
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    const variant = await db.query(
+      `INSERT INTO product_variants
+       (product_id, color, size, sku, stock_quantity, base_price, discount_percentage)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        id,
+        color,
+        size,
+        sku || null,
+        stock_quantity || 0,
+        base_price || product.rows[0].price,
+        discount_percentage || 0,
+      ]
+    );
+
+    await redis.del(`product:${id}`);
+
+    res.status(201).json({
+      success: true,
+      variant: variant.rows[0],
+      message: "Variant created successfully",
+    });
+  } catch (error) {
+    console.error("Create variant error:", error);
+    res.status(500).json({ error: "Failed to create variant" });
+  }
+};
+
+exports.updateVariant = async (req, res) => {
+  try {
+    const { id, variantId } = req.params;
+    const updates = req.body;
+
+    delete updates.id;
+    delete updates.product_id;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    const fields = Object.keys(updates);
+    const values = Object.values(updates);
+    const setClause = fields
+      .map((field, index) => `${field} = $${index + 3}`)
+      .join(", ");
+
+    const variant = await db.query(
+      `UPDATE product_variants SET ${setClause} WHERE id = $1 AND product_id = $2 RETURNING *`,
+      [variantId, id, ...values]
+    );
+
+    if (variant.rows.length === 0) {
+      return res.status(404).json({ error: "Variant not found" });
+    }
+
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      variant: variant.rows[0],
+      message: "Variant updated successfully",
+    });
+  } catch (error) {
+    console.error("Update variant error:", error);
+    res.status(500).json({ error: "Failed to update variant" });
+  }
+};
+
+exports.deleteVariant = async (req, res) => {
+  try {
+    const { id, variantId } = req.params;
+
+    const result = await db.query(
+      "DELETE FROM product_variants WHERE id = $1 AND product_id = $2 RETURNING *",
+      [variantId, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Variant not found" });
+    }
+
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      message: "Variant deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete variant error:", error);
+    res.status(500).json({ error: "Failed to delete variant" });
+  }
+};
+
+exports.getProductVariants = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const variants = await db.query(
+      `SELECT id, product_id, color, size, base_price, 
+              discount_percentage, stock_quantity, sku
+       FROM product_variants
+       WHERE product_id = $1 AND stock_quantity >= 0
+       ORDER BY color, size`,
+      [productId]
+    );
+
+    res.json({
+      variants: variants.rows,
+      count: variants.rows.length,
+    });
+  } catch (error) {
+    console.error("Get variants error:", error);
+    res.status(500).json({ error: "Failed to fetch variants" });
+  }
+};
+
+// Create product (Admin)
+exports.createProduct = async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      price,
+      original_price,
+      discount_percentage,
+      category,
+      brand,
+      images,
+      stock_quantity,
+      seller_id,
+      tags,
+    } = req.body;
+
+    // Validation
+    if (!name || !price || !category) {
+      return res.status(400).json({
+        error: "Name, price, and category are required",
+      });
+    }
+
+    const product = await db.query(
+      `INSERT INTO products 
+       (name, description, price, original_price, discount_percentage, 
+        category, brand, images, stock_quantity, seller_id, tags, 
+        created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+       RETURNING *`,
+      [
+        name,
+        description,
+        price,
+        original_price || price,
+        discount_percentage || 0,
+        category,
+        brand,
+        images || [],
+        stock_quantity || 0,
+        seller_id,
+        tags || [],
+      ]
+    );
+
+    res.status(201).json({
+      success: true,
+      product: product.rows[0],
+      message: "Product created successfully",
+    });
+  } catch (error) {
+    console.error("Create product error:", error);
+    res.status(500).json({ error: "Failed to create product" });
+  }
+};
+
+// Update product (Admin)
+exports.updateProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    // Don't allow updating id or timestamps
+    delete updates.id;
+    delete updates.created_at;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    // Build dynamic update query
+    const fields = Object.keys(updates);
+    const values = Object.values(updates);
+    const setClause = fields
+      .map((field, index) => `${field} = ${index + 2}`)
+      .join(", ");
+
+    const query = `
+      UPDATE products 
+      SET ${setClause}, updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `;
+
+    const product = await db.query(query, [id, ...values]);
+
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Clear cache
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      product: product.rows[0],
+      message: "Product updated successfully",
+    });
+  } catch (error) {
+    console.error("Update product error:", error);
+    res.status(500).json({ error: "Failed to update product" });
+  }
+};
+
+// Delete product (Admin)
+exports.deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if product exists
+    const product = await db.query("SELECT * FROM products WHERE id = $1", [
+      id,
+    ]);
+
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Delete product (this will cascade delete variants, reviews, etc. if set up)
+    await db.query("DELETE FROM products WHERE id = $1", [id]);
+
+    // Clear cache
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      message: "Product deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete product error:", error);
+    res.status(500).json({ error: "Failed to delete product" });
+  }
+};
+
+// Clear product cache (Admin)
+exports.clearCache = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cacheKey = `product:${id}`;
+    await redis.del(cacheKey);
+
+    res.json({
+      success: true,
+      message: "Cache cleared successfully",
+    });
+  } catch (error) {
+    console.error("Clear cache error:", error);
+    res.status(500).json({ error: "Failed to clear cache" });
+  }
+};
+
+// Create product variant (Admin)
+exports.createVariant = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      color,
+      size,
+      sku,
+      stock_quantity,
+      base_price,
+      discount_percentage,
+    } = req.body;
+
+    // Check if product exists
+    const product = await db.query("SELECT * FROM products WHERE id = $1", [
+      id,
+    ]);
+
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    const variant = await db.query(
+      `INSERT INTO product_variants 
+       (product_id, color, size, sku, stock_quantity, base_price, discount_percentage)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        id,
+        color,
+        size,
+        sku || null,
+        stock_quantity || 0,
+        base_price || product.rows[0].price,
+        discount_percentage || 0,
+      ]
+    );
+
+    // Clear product cache
+    await redis.del(`product:${id}`);
+
+    res.status(201).json({
+      success: true,
+      variant: variant.rows[0],
+      message: "Variant created successfully",
+    });
+  } catch (error) {
+    console.error("Create variant error:", error);
+    res.status(500).json({ error: "Failed to create variant" });
+  }
+};
+
+// Update product variant (Admin)
+exports.updateVariant = async (req, res) => {
+  try {
+    const { id, variantId } = req.params;
+    const updates = req.body;
+
+    delete updates.id;
+    delete updates.product_id;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    const fields = Object.keys(updates);
+    const values = Object.values(updates);
+    const setClause = fields
+      .map((field, index) => `${field} = ${index + 3}`)
+      .join(", ");
+
+    const query = `
+      UPDATE product_variants 
+      SET ${setClause}
+      WHERE id = $1 AND product_id = $2
+      RETURNING *
+    `;
+
+    const variant = await db.query(query, [variantId, id, ...values]);
+
+    if (variant.rows.length === 0) {
+      return res.status(404).json({ error: "Variant not found" });
+    }
+
+    // Clear product cache
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      variant: variant.rows[0],
+      message: "Variant updated successfully",
+    });
+  } catch (error) {
+    console.error("Update variant error:", error);
+    res.status(500).json({ error: "Failed to update variant" });
+  }
+};
+
+// Delete product variant (Admin)
+exports.deleteVariant = async (req, res) => {
+  try {
+    const { id, variantId } = req.params;
+
+    const result = await db.query(
+      "DELETE FROM product_variants WHERE id = $1 AND product_id = $2 RETURNING *",
+      [variantId, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Variant not found" });
+    }
+
+    // Clear product cache
+    await redis.del(`product:${id}`);
+
+    res.json({
+      success: true,
+      message: "Variant deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete variant error:", error);
+    res.status(500).json({ error: "Failed to delete variant" });
   }
 };
