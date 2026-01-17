@@ -157,3 +157,27 @@ exports.removeFromCart = async (req, res) => {
     res.status(500).json({ error: "Failed to remove from cart" });
   }
 };
+
+// Get product variants
+exports.getProductVariants = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const variants = await db.query(
+      `SELECT id, product_id, color, size, base_price, 
+              discount_percentage, stock_quantity, sku
+       FROM product_variants
+       WHERE product_id = $1 AND stock_quantity >= 0
+       ORDER BY color, size`,
+      [productId]
+    );
+
+    res.json({
+      variants: variants.rows,
+      count: variants.rows.length,
+    });
+  } catch (error) {
+    console.error("Get variants error:", error);
+    res.status(500).json({ error: "Failed to fetch variants" });
+  }
+};

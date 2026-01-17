@@ -8,6 +8,7 @@ router.get("/:id/details", productController.getProductDetails);
 router.get("/search", productController.searchProducts);
 router.get("/brands", productController.getBrands);
 router.get("/tags", productController.getTags);
+router.get("/:productId/variants", productController.getProductVariants);
 router.post("/:id/view", authenticateUser, productController.trackView);
 
 // Temporary endpoint to clear product cache
