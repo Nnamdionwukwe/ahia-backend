@@ -191,6 +191,30 @@ exports.getProductsByCategory = async (req, res) => {
   }
 };
 
+exports.getCategories = async (req, res) => {
+  try {
+    const categories = await db.query(`
+      SELECT DISTINCT category, COUNT(*) as product_count
+      FROM products
+      WHERE category IS NOT NULL AND stock_quantity > 0
+      GROUP BY category
+      ORDER BY product_count DESC
+    `);
+
+    res.json({
+      categories: categories.rows.map((row) => ({
+        name: row.category,
+        slug: row.category.toLowerCase().replace(/\s+/g, "-"),
+        count: parseInt(row.product_count),
+      })),
+      total: categories.rows.length,
+    });
+  } catch (error) {
+    console.error("Get categories error:", error);
+    res.status(500).json({ error: "Failed to fetch categories" });
+  }
+};
+
 // Create product (Admin)
 exports.createProduct = async (req, res) => {
   try {
