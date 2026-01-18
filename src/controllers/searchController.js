@@ -207,12 +207,85 @@ exports.advancedSearch = async (req, res) => {
 };
 
 // Autocomplete suggestions
+// exports.autocomplete = async (req, res) => {
+//   try {
+//     const { q } = req.query;
+
+//     if (!q || q.length < 2) {
+//       return res.json({ suggestions: [] });
+//     }
+
+//     // Check cache first
+//     const cacheKey = `autocomplete:${q.toLowerCase()}`;
+//     const cached = await redis.get(cacheKey);
+//     if (cached) {
+//       return res.json(JSON.parse(cached));
+//     }
+
+//     const result = await esClient.search({
+//       index: PRODUCTS_INDEX,
+//       body: {
+//         size: 10,
+//         query: {
+//           bool: {
+//             should: [
+//               {
+//                 match_phrase_prefix: {
+//                   name: {
+//                     query: q,
+//                     boost: 3,
+//                   },
+//                 },
+//               },
+//               {
+//                 match: {
+//                   "name.ngram": {
+//                     query: q,
+//                     boost: 2,
+//                   },
+//                 },
+//               },
+//               {
+//                 match: {
+//                   category: {
+//                     query: q,
+//                     boost: 1,
+//                   },
+//                 },
+//               },
+//             ],
+//           },
+//         },
+//         _source: ["name", "category", "price", "images"],
+//         aggs: {
+//           categories: {
+//             terms: { field: "category.keyword", size: 5 },
+//           },
+//         },
+//       },
+//     });
+
+//     const suggestions = {
+//       products: result.hits.hits.map((hit) => hit._source),
+//       categories: result.aggregations.categories.buckets.map((b) => b.key),
+//     };
+
+//     // Cache for 5 minutes
+//     await redis.setex(cacheKey, 300, JSON.stringify(suggestions));
+
+//     res.json(suggestions);
+//   } catch (error) {
+//     console.error("Autocomplete error:", error);
+//     res.status(500).json({ error: "Autocomplete failed" });
+//   }
+// };
+
 exports.autocomplete = async (req, res) => {
   try {
     const { q } = req.query;
 
     if (!q || q.length < 2) {
-      return res.json({ suggestions: [] });
+      return res.json({ suggestions: [], products: [], categories: [] });
     }
 
     // Check cache first
@@ -222,52 +295,85 @@ exports.autocomplete = async (req, res) => {
       return res.json(JSON.parse(cached));
     }
 
-    const result = await esClient.search({
-      index: PRODUCTS_INDEX,
-      body: {
-        size: 10,
-        query: {
-          bool: {
-            should: [
-              {
-                match_phrase_prefix: {
-                  name: {
-                    query: q,
-                    boost: 3,
+    // If you're using Elasticsearch
+    if (esClient) {
+      try {
+        const result = await esClient.search({
+          index: PRODUCTS_INDEX,
+          body: {
+            size: 10,
+            query: {
+              bool: {
+                should: [
+                  {
+                    match_phrase_prefix: {
+                      name: {
+                        query: q,
+                        boost: 3,
+                      },
+                    },
                   },
-                },
-              },
-              {
-                match: {
-                  "name.ngram": {
-                    query: q,
-                    boost: 2,
+                  {
+                    match: {
+                      category: {
+                        query: q,
+                        boost: 1,
+                      },
+                    },
                   },
-                },
+                ],
               },
-              {
-                match: {
-                  category: {
-                    query: q,
-                    boost: 1,
-                  },
-                },
+            },
+            _source: ["id", "name", "category", "price", "images"], // IMPORTANT: Include 'id'
+            aggs: {
+              categories: {
+                terms: { field: "category.keyword", size: 5 },
               },
-            ],
+            },
           },
-        },
-        _source: ["name", "category", "price", "images"],
-        aggs: {
-          categories: {
-            terms: { field: "category.keyword", size: 5 },
-          },
-        },
-      },
-    });
+        });
+
+        const suggestions = {
+          products: result.hits.hits.map((hit) => ({
+            id: hit._id, // IMPORTANT: Return the ID
+            ...hit._source,
+          })),
+          categories: result.aggregations.categories.buckets.map((b) => b.key),
+        };
+
+        // Cache for 5 minutes
+        await redis.setex(cacheKey, 300, JSON.stringify(suggestions));
+
+        return res.json(suggestions);
+      } catch (esError) {
+        console.error("Elasticsearch autocomplete error:", esError);
+        // Fall through to PostgreSQL fallback
+      }
+    }
+
+    // PostgreSQL fallback (if Elasticsearch is not available)
+    const products = await db.query(
+      `SELECT id, name, category, price, images
+       FROM products
+       WHERE (name ILIKE $1 OR category ILIKE $1)
+       AND stock_quantity > 0
+       ORDER BY rating DESC, total_reviews DESC
+       LIMIT 10`,
+      [`%${q}%`]
+    );
+
+    const categories = await db.query(
+      `SELECT DISTINCT category
+       FROM products
+       WHERE category ILIKE $1
+       AND stock_quantity > 0
+       LIMIT 5`,
+      [`%${q}%`]
+    );
 
     const suggestions = {
-      products: result.hits.hits.map((hit) => hit._source),
-      categories: result.aggregations.categories.buckets.map((b) => b.key),
+      products: products.rows, // Already includes 'id' from SELECT
+      categories: categories.rows.map((row) => row.category),
     };
 
     // Cache for 5 minutes
@@ -276,7 +382,11 @@ exports.autocomplete = async (req, res) => {
     res.json(suggestions);
   } catch (error) {
     console.error("Autocomplete error:", error);
-    res.status(500).json({ error: "Autocomplete failed" });
+    res.status(500).json({
+      error: "Autocomplete failed",
+      products: [],
+      categories: [],
+    });
   }
 };
 
@@ -556,21 +666,38 @@ exports.reindexAllProducts = async (req, res) => {
 };
 
 // Helper: Track search queries
+// async function trackSearchQuery(query, resultCount) {
+//   try {
+//     const today = new Date().toISOString().split("T")[0];
+
+//     // Store in Redis sorted set for popular searches
+//     // FIXED: Use correct Redis command (uppercase)
+//     await redis.zIncrBy(`popular_searches:${today}`, 1, query.toLowerCase());
+
+//     // Track search result quality
+//     if (resultCount === 0) {
+//       // FIXED: Use correct Redis command (uppercase)
+//       await redis.SADD("zero_result_searches", query.toLowerCase());
+//     }
+//   } catch (error) {
+//     // Log error but don't throw - tracking failure shouldn't break search
+//     console.error("Redis tracking error:", error);
+//   }
+// }
+
 async function trackSearchQuery(query, resultCount) {
   try {
     const today = new Date().toISOString().split("T")[0];
 
-    // Store in Redis sorted set for popular searches
-    // FIXED: Use correct Redis command (uppercase)
-    await redis.ZINCRBY(`popular_searches:${today}`, 1, query.toLowerCase());
+    // FIX: Use lowercase method names for ioredis
+    await redis.zIncrBy(`popular_searches:${today}`, 1, query.toLowerCase());
 
     // Track search result quality
     if (resultCount === 0) {
-      // FIXED: Use correct Redis command (uppercase)
-      await redis.SADD("zero_result_searches", query.toLowerCase());
+      await redis.sAdd("zero_result_searches", query.toLowerCase());
     }
   } catch (error) {
-    // Log error but don't throw - tracking failure shouldn't break search
+    // Log but don't throw - tracking shouldn't break search
     console.error("Redis tracking error:", error);
   }
 }
