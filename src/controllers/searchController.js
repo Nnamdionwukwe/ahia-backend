@@ -212,7 +212,7 @@ exports.autocomplete = async (req, res) => {
     const { q } = req.query;
 
     if (!q || q.length < 2) {
-      return res.json({ suggestions: [] });
+      return res.json({ products: [], suggestions: [] });
     }
 
     // Check cache first
