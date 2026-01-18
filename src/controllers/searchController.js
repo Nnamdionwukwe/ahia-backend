@@ -266,9 +266,17 @@ exports.autocomplete = async (req, res) => {
     });
 
     const suggestions = {
-      products: result.hits.hits.map((hit) => hit._source),
+      products: result.hits.hits.map((hit) => ({
+        id: hit._id, // IMPORTANT: Map _id to id
+        ...hit._source,
+      })),
       categories: result.aggregations.categories.buckets.map((b) => b.key),
     };
+
+    // const suggestions = {
+    //   products: result.hits.hits.map((hit) => hit._source),
+    //   categories: result.aggregations.categories.buckets.map((b) => b.key),
+    // };
 
     // Cache for 5 minutes
     await redis.setex(cacheKey, 300, JSON.stringify(suggestions));
