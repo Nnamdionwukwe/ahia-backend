@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require("uuid");
 
 const wishlistController = {
   // Add to wishlist
-  addToWishlist: async (req, res) => {
+exports.addToWishlist = async (req, res) => {
     const userId = req.user.id;
     const { productId } = req.params;
     try {
