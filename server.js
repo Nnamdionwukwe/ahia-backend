@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -11,7 +10,7 @@ app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
-    crossOriginEmbedderPolicy: false, // Allow Google OAuth embedding
+    crossOriginEmbedderPolicy: false,
   })
 );
 
@@ -152,7 +151,7 @@ app.get("/health/full", async (req, res) => {
   }
 });
 
-// Load routes with error handling
+// ============ LOAD ROUTES WITH DETAILED ERROR HANDLING ============
 let routes = {};
 const routeFiles = [
   { path: "/api/auth", file: "./src/routes/auth", name: "auth" },
@@ -189,15 +188,32 @@ const routeFiles = [
 
 routeFiles.forEach(({ path, file, name }) => {
   try {
+    console.log(`\n📍 Loading ${name} from ${file}...`);
+
+    // Clear the require cache to ensure fresh load
+    delete require.cache[require.resolve(file)];
+
     const route = require(file);
+
+    // Verify it's a valid router/middleware
+    if (!route || typeof route !== "function") {
+      throw new Error(`${file} does not export a valid Express router`);
+    }
+
     app.use(path, route);
     routes[name] = "loaded";
-    console.log(`✅ ${name} routes loaded`);
+    console.log(`✅ ${name} routes loaded successfully on path ${path}`);
   } catch (error) {
-    routes[name] = "failed: " + error.message;
-    console.error(`❌ Failed to load ${name} routes:`, error.message);
+    routes[name] = error.message;
+    console.error(`\n❌ FAILED TO LOAD ${name}:`);
+    console.error(`   File: ${file}`);
+    console.error(`   Error: ${error.message}`);
+    if (error.stack) {
+      console.error(`   Stack: ${error.stack}`);
+    }
   }
 });
+
 // Background jobs (only if not in test mode)
 if (process.env.NODE_ENV !== "test") {
   try {
@@ -223,6 +239,7 @@ app.use((req, res) => {
     error: "Route not found",
     path: req.path,
     method: req.method,
+    availableRoutes: Object.keys(routes),
   });
 });
 
@@ -245,17 +262,18 @@ const PORT = process.env.PORT || 5001;
 
 const server = app.listen(PORT, "0.0.0.0", () => {
   console.log("\n🚀 E-commerce API Server");
-  console.log("━".repeat(50));
+  console.log("━".repeat(60));
   console.log(`📍 Server:        http://0.0.0.0:${PORT}`);
   console.log(`🏥 Health Check:  http://0.0.0.0:${PORT}/health`);
   console.log(`📚 API Docs:      http://0.0.0.0:${PORT}/api`);
-  console.log("━".repeat(50));
+  console.log("━".repeat(60));
   console.log(`🌍 Environment:   ${process.env.NODE_ENV || "development"}`);
   console.log(`🔌 Port:          ${PORT}`);
-  console.log("━".repeat(50));
-  console.log("\n📦 Loaded Routes:");
+  console.log("━".repeat(60));
+  console.log("\n📦 Route Load Status:");
   Object.entries(routes).forEach(([name, status]) => {
-    console.log(`   ${status === "loaded" ? "✅" : "❌"} ${name}: ${status}`);
+    const isLoaded = status === "loaded";
+    console.log(`   ${isLoaded ? "✅" : "❌"} ${name}: ${status}`);
   });
   console.log("\n");
 });
