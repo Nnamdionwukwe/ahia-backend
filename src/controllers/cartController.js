@@ -8,9 +8,9 @@ exports.addToCart = async (req, res) => {
     const userId = req.user.id;
     const { product_variant_id, quantity } = req.body;
 
-    if (!product_variant_id || !quantity) {
+    if (!product_variant_id || quantity === undefined) {
       return res.status(400).json({
-        error: "Product variant ID and quantity required",
+        error: "Product variant ID and quantity are required",
       });
     }
 
@@ -32,11 +32,11 @@ exports.addToCart = async (req, res) => {
 
     // Add to cart
     const cart = await db.query(
-      `INSERT INTO carts (user_id, product_variant_id, quantity, added_at, updated_at)
-             VALUES ($1, $2, $3, NOW(), NOW())
-             ON CONFLICT (user_id, product_variant_id)
-             DO UPDATE SET quantity = quantity + $3, updated_at = NOW()
-             RETURNING *`,
+      `INSERT INTO carts (user_id, product_variant_id, quantity, created_at, updated_at)
+       VALUES ($1, $2, $3, NOW(), NOW())
+       ON CONFLICT (user_id, product_variant_id)
+       DO UPDATE SET quantity = carts.quantity + $3, updated_at = NOW()
+       RETURNING *`,
       [userId, product_variant_id, quantity]
     );
 
@@ -52,7 +52,6 @@ exports.addToCart = async (req, res) => {
     res.status(500).json({ error: "Failed to add to cart" });
   }
 };
-
 // Get cart
 exports.getCart = async (req, res) => {
   try {
