@@ -18,7 +18,6 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
       `SELECT 
         ss.id,
         ss.name,
-        ss.season,
         ss.description,
         ss.start_time,
         ss.end_time,
@@ -46,7 +45,6 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
     res.json({
       id: sale.id,
       name: sale.name,
-      season: sale.season,
       description: sale.description,
       start_time: sale.start_time,
       end_time: sale.end_time,
@@ -80,7 +78,6 @@ exports.getActiveSeasonalSales = async (req, res) => {
       `SELECT 
         ss.id,
         ss.name,
-        ss.season,
         ss.description,
         ss.start_time,
         ss.end_time,
@@ -191,7 +188,7 @@ exports.getSeasonalSaleProducts = async (req, res) => {
 
     // Verify seasonal sale exists
     const saleCheck = await db.query(
-      "SELECT id, name, season, start_time, end_time, banner_color FROM seasonal_sales WHERE id = $1",
+      "SELECT id, name, start_time, end_time FROM seasonal_sales WHERE id = $1",
       [saleId]
     );
 
@@ -232,7 +229,6 @@ exports.getSeasonalSaleProducts = async (req, res) => {
         p.name,
         p.images,
         p.rating,
-        p.reviews_count,
         p.category,
         ssp.sale_price,
         ssp.original_price,
@@ -257,15 +253,10 @@ exports.getSeasonalSaleProducts = async (req, res) => {
       seasonalSale: {
         id: seasonalSale.id,
         name: seasonalSale.name,
-        season: seasonalSale.season,
         start_time: seasonalSale.start_time,
         end_time: seasonalSale.end_time,
-        banner_color: seasonalSale.banner_color,
       },
-      products: products.rows.map((p) => ({
-        ...p,
-        season: seasonalSale.season,
-      })),
+      products: products.rows,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -281,6 +272,8 @@ exports.getSeasonalSaleProducts = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch products" });
   }
 };
+
+// Add these functions to your existing seasonalSalesController.js
 
 // Create seasonal sale (Admin only)
 exports.createSeasonalSale = async (req, res) => {
