@@ -10,6 +10,10 @@ router.get(
   "/product/:productId",
   seasonalSalesController.getSeasonalSaleByProductId
 );
+router.get(
+  "/:saleId/products",
+  seasonalSalesController.getSeasonalSaleProducts
+);
 router.get("/:saleId", seasonalSalesController.getSeasonalSaleById);
 
 module.exports = router;
