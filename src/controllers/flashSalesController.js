@@ -631,4 +631,67 @@ exports.getFlashSaleAnalytics = async (req, res) => {
   }
 };
 
+// Add this function to flashSalesController.js (before module.exports)
+
+// Get flash sale for a specific product
+exports.getFlashSaleByProductId = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    if (!productId || productId === "undefined") {
+      return res.json(null);
+    }
+
+    const now = new Date();
+
+    const flashSale = await db.query(
+      `SELECT 
+        fs.id,
+        fs.title,
+        fs.description,
+        fs.start_time,
+        fs.end_time,
+        fs.status,
+        fsp.sale_price,
+        fsp.original_price,
+        fsp.max_quantity,
+        fsp.sold_quantity,
+        (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
+        ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage
+       FROM flash_sales fs
+       JOIN flash_sale_products fsp ON fs.id = fsp.flash_sale_id
+       WHERE fsp.product_id = $1
+         AND fs.status = 'active'
+         AND fs.start_time <= $2
+         AND fs.end_time > $2
+       LIMIT 1`,
+      [productId, now]
+    );
+
+    if (flashSale.rows.length === 0) {
+      return res.json(null);
+    }
+
+    const sale = flashSale.rows[0];
+    res.json({
+      id: sale.id,
+      title: sale.title,
+      description: sale.description,
+      start_time: sale.start_time,
+      end_time: sale.end_time,
+      discount_percentage: sale.discount_percentage,
+      status: sale.status,
+      sale_price: sale.sale_price,
+      original_price: sale.original_price,
+      sold_quantity: sale.sold_quantity,
+      remaining_quantity: sale.remaining_quantity,
+    });
+  } catch (error) {
+    console.error("Get flash sale by product error:", error);
+    res.json(null);
+  }
+};
+
+module.exports = exports;
+
 module.exports = exports;
