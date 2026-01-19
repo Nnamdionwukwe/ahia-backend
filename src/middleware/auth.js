@@ -1,4 +1,3 @@
-// src/middleware/auth.js
 const jwt = require("jsonwebtoken");
 const db = require("../config/database");
 
@@ -6,7 +5,7 @@ const db = require("../config/database");
 exports.authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(" ")[1]; // Bearer TOKEN
+    const token = authHeader?.split(" ")[1]; // Bearer TOKEN
 
     if (!token) {
       return res.status(401).json({ error: "Access token required" });
@@ -18,10 +17,10 @@ exports.authenticateToken = async (req, res, next) => {
     // Get user details with role
     const user = await db.query(
       `SELECT u.id, u.phone_number, u.full_name, u.role, u.is_verified,
-              s.id as seller_id, s.store_name
-       FROM users u
-       LEFT JOIN sellers s ON u.id = s.user_id
-       WHERE u.id = $1`,
+                    s.id as seller_id, s.store_name
+            FROM users u
+            LEFT JOIN sellers s ON u.id = s.user_id
+            WHERE u.id = $1`,
       [decoded.userId]
     );
 
@@ -48,6 +47,7 @@ exports.authenticateToken = async (req, res, next) => {
     if (error.name === "JsonWebTokenError") {
       return res.status(401).json({ error: "Invalid token" });
     }
+    // Log the error for debugging in production
     console.error("Authentication error:", error);
     res.status(500).json({ error: "Authentication failed" });
   }
@@ -133,7 +133,7 @@ exports.requireSeller = async (req, res, next) => {
   }
 };
 
-// Require account verification
+// Account verification check
 exports.requireVerification = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ error: "Authentication required" });
@@ -153,7 +153,7 @@ exports.requireVerification = (req, res, next) => {
 exports.optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(" ")[1];
+    const token = authHeader?.split(" ")[1];
 
     if (!token) {
       return next(); // No token, continue as guest
@@ -163,10 +163,10 @@ exports.optionalAuth = async (req, res, next) => {
 
     const user = await db.query(
       `SELECT u.id, u.phone_number, u.full_name, u.role, u.is_verified,
-              s.id as seller_id
-       FROM users u
-       LEFT JOIN sellers s ON u.id = s.user_id
-       WHERE u.id = $1`,
+                    s.id as seller_id
+            FROM users u
+            LEFT JOIN sellers s ON u.id = s.user_id
+            WHERE u.id = $1`,
       [decoded.userId]
     );
 
@@ -188,7 +188,7 @@ exports.optionalAuth = async (req, res, next) => {
   }
 };
 
-// Check permissions for specific resource
+// Check permissions for specific resources
 exports.checkResourcePermission = (resourceType) => {
   return async (req, res, next) => {
     try {
@@ -209,9 +209,9 @@ exports.checkResourcePermission = (resourceType) => {
           // Check if user owns the product (is the seller)
           const product = await db.query(
             `SELECT p.seller_id, s.user_id
-             FROM products p
-             JOIN sellers s ON p.seller_id = s.id
-             WHERE p.id = $1`,
+                         FROM products p
+                         JOIN sellers s ON p.seller_id = s.id
+                         WHERE p.id = $1`,
             [resourceId]
           );
 
@@ -230,13 +230,13 @@ exports.checkResourcePermission = (resourceType) => {
           // Check if user owns the order or is the seller
           const order = await db.query(
             `SELECT o.user_id,
-                    array_agg(DISTINCT s.user_id) as seller_user_ids
-             FROM orders o
-             LEFT JOIN order_items oi ON o.id = oi.order_id
-             LEFT JOIN products p ON oi.product_id = p.id
-             LEFT JOIN sellers s ON p.seller_id = s.id
-             WHERE o.id = $1
-             GROUP BY o.id, o.user_id`,
+                                array_agg(DISTINCT s.user_id) as seller_user_ids
+                         FROM orders o
+                         LEFT JOIN order_items oi ON o.id = oi.order_id
+                         LEFT JOIN products p ON oi.product_id = p.id
+                         LEFT JOIN sellers s ON p.seller_id = s.id
+                         WHERE o.id = $1
+                         GROUP BY o.id, o.user_id`,
             [resourceId]
           );
 
@@ -246,7 +246,6 @@ exports.checkResourcePermission = (resourceType) => {
 
           const isOwner = order.rows[0].user_id === req.user.id;
           const isSeller = order.rows[0].seller_user_ids?.includes(req.user.id);
-
           if (!isOwner && !isSeller) {
             return res
               .status(403)
@@ -315,5 +314,6 @@ exports.userRateLimit = (maxRequests, windowMs) => {
     next();
   };
 };
-// At the very end of src/middleware/auth.js
+
+// Export for backward compatibility
 exports.authenticateUser = exports.authenticateToken;
