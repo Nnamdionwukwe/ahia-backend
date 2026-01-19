@@ -22,11 +22,12 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
         ss.start_time,
         ss.end_time,
         ss.banner_color,
-        ssp.sale_price,
-        ssp.original_price,
-        ROUND(((ssp.original_price - ssp.sale_price) / ssp.original_price) * 100) as discount_percentage
+        p.price as sale_price,
+        p.original_price,
+        ROUND(((p.original_price - p.price) / p.original_price) * 100) as discount_percentage
        FROM seasonal_sales ss
        JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
+       JOIN products p ON ssp.product_id = p.id
        WHERE ssp.product_id = $1
          AND ss.start_time <= $2
          AND ss.end_time > $2
@@ -47,8 +48,8 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
       end_time: sale.end_time,
       banner_color: sale.banner_color,
       sale_price: sale.sale_price,
-      original_price: sale.original_price,
-      discount_percentage: sale.discount_percentage,
+      original_price: sale.original_price || sale.sale_price,
+      discount_percentage: sale.discount_percentage || 0,
     });
   } catch (error) {
     console.error("Get seasonal sale by product error:", error);
@@ -207,9 +208,9 @@ exports.getSeasonalSaleProducts = async (req, res) => {
         p.images,
         p.rating,
         p.category,
-        ssp.sale_price,
-        ssp.original_price,
-        ROUND(((ssp.original_price - ssp.sale_price) / ssp.original_price) * 100) as discount_percentage
+        p.price as sale_price,
+        p.original_price,
+        ROUND(((p.original_price - p.price) / p.original_price) * 100) as discount_percentage
        FROM seasonal_sale_products ssp
        JOIN products p ON ssp.product_id = p.id
        WHERE ssp.seasonal_sale_id = $1
