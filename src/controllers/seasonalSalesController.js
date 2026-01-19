@@ -22,12 +22,14 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
         ss.start_time,
         ss.end_time,
         ss.banner_color,
-        p.price as sale_price,
-        p.original_price,
-        ROUND(((p.original_price - p.price) / p.original_price) * 100) as discount_percentage
+        ssp.sale_price,
+        ssp.original_price,
+        ssp.max_quantity,
+        ssp.sold_quantity,
+        (ssp.max_quantity - ssp.sold_quantity) as remaining_quantity,
+        ROUND(((ssp.original_price - ssp.sale_price) / ssp.original_price) * 100) as discount_percentage
        FROM seasonal_sales ss
        JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
-       JOIN products p ON ssp.product_id = p.id
        WHERE ssp.product_id = $1
          AND ss.start_time <= $2
          AND ss.end_time > $2
@@ -48,8 +50,11 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
       end_time: sale.end_time,
       banner_color: sale.banner_color,
       sale_price: sale.sale_price,
-      original_price: sale.original_price || sale.sale_price,
+      original_price: sale.original_price,
       discount_percentage: sale.discount_percentage || 0,
+      max_quantity: sale.max_quantity,
+      sold_quantity: sale.sold_quantity,
+      remaining_quantity: sale.remaining_quantity,
     });
   } catch (error) {
     console.error("Get seasonal sale by product error:", error);
@@ -71,17 +76,22 @@ exports.getActiveSeasonalSales = async (req, res) => {
 
     const seasonalSales = await db.query(
       `SELECT 
-        id,
-        name,
-        description,
-        start_time,
-        end_time,
-        banner_color,
-        created_at
-       FROM seasonal_sales
-       WHERE start_time <= $1
-         AND end_time > $1
-       ORDER BY created_at DESC`,
+        ss.id,
+        ss.name,
+        ss.description,
+        ss.start_time,
+        ss.end_time,
+        ss.banner_color,
+        ss.created_at,
+        COUNT(ssp.id) as total_products,
+        SUM(ssp.sold_quantity) as total_sold,
+        SUM(ssp.max_quantity) as total_quantity
+       FROM seasonal_sales ss
+       LEFT JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
+       WHERE ss.start_time <= $1
+         AND ss.end_time > $1
+       GROUP BY ss.id
+       ORDER BY ss.created_at DESC`,
       [now]
     );
 
@@ -119,7 +129,15 @@ exports.getSeasonalSaleById = async (req, res) => {
     }
 
     const seasonalSale = await db.query(
-      `SELECT * FROM seasonal_sales WHERE id = $1`,
+      `SELECT 
+        ss.*,
+        COUNT(ssp.id) as total_products,
+        SUM(ssp.sold_quantity) as total_sold,
+        SUM(ssp.max_quantity) as total_quantity
+       FROM seasonal_sales ss
+       LEFT JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
+       WHERE ss.id = $1
+       GROUP BY ss.id`,
       [saleId]
     );
 
@@ -181,13 +199,17 @@ exports.getSeasonalSaleProducts = async (req, res) => {
     const seasonalSale = saleCheck.rows[0];
 
     // Determine sort order
-    let orderBy = "p.created_at DESC";
+    let orderBy = "ssp.sold_quantity DESC, p.name ASC";
     if (sort === "price_asc") {
       orderBy = "ssp.sale_price ASC";
     } else if (sort === "price_desc") {
       orderBy = "ssp.sale_price DESC";
     } else if (sort === "rating") {
       orderBy = "p.rating DESC";
+    } else if (sort === "discount") {
+      orderBy = "(ssp.original_price - ssp.sale_price) DESC";
+    } else if (sort === "stock") {
+      orderBy = "(ssp.max_quantity - ssp.sold_quantity) DESC";
     }
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -208,9 +230,17 @@ exports.getSeasonalSaleProducts = async (req, res) => {
         p.images,
         p.rating,
         p.category,
-        p.price as sale_price,
-        p.original_price,
-        ROUND(((p.original_price - p.price) / p.original_price) * 100) as discount_percentage
+        ssp.sale_price,
+        ssp.original_price,
+        ssp.max_quantity,
+        ssp.sold_quantity,
+        (ssp.max_quantity - ssp.sold_quantity) as remaining_quantity,
+        CASE 
+          WHEN ssp.max_quantity > 0 
+          THEN ROUND((ssp.sold_quantity::decimal / ssp.max_quantity) * 100)
+          ELSE 0
+        END as sold_percentage,
+        ROUND(((ssp.original_price - ssp.sale_price) / ssp.original_price) * 100) as discount_percentage
        FROM seasonal_sale_products ssp
        JOIN products p ON ssp.product_id = p.id
        WHERE ssp.seasonal_sale_id = $1
