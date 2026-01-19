@@ -166,6 +166,11 @@ const routeFiles = [
     file: "./src/routes/flashSales",
     name: "flashSales",
   },
+  {
+    path: "/api/seasonal-sales",
+    file: "./src/routes/seasonalSales",
+    name: "seasonalSales",
+  },
   { path: "/api/search", file: "./src/routes/search", name: "search" },
   { path: "/api/chat", file: "./src/routes/chat", name: "chat" },
   { path: "/api/loyalty", file: "./src/routes/loyalty", name: "loyalty" },
@@ -180,12 +185,6 @@ const routeFiles = [
     file: "./src/routes/analytics",
     name: "analytics",
   },
-  // ADD SALES ROUTES HERE
-  {
-    path: "/api",
-    file: "./src/routes/sales",
-    name: "sales",
-  },
 ];
 
 routeFiles.forEach(({ path, file, name }) => {
@@ -199,7 +198,6 @@ routeFiles.forEach(({ path, file, name }) => {
     console.error(`❌ Failed to load ${name} routes:`, error.message);
   }
 });
-
 // Background jobs (only if not in test mode)
 if (process.env.NODE_ENV !== "test") {
   try {
