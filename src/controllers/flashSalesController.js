@@ -284,6 +284,111 @@ exports.getFlashSaleById = async (req, res) => {
 };
 
 // Get products for a specific flash sale
+// exports.getFlashSaleProducts = async (req, res) => {
+//   try {
+//     const { flashSaleId } = req.params;
+//     const { page = 1, limit = 20, sort = "popularity" } = req.query;
+
+//     if (!flashSaleId || flashSaleId === "undefined") {
+//       return res.status(400).json({ error: "Valid flash sale ID is required" });
+//     }
+
+//     const cacheKey = `flash_sale:${flashSaleId}:products:${page}:${limit}:${sort}`;
+//     const cached = await redis.get(cacheKey);
+
+//     if (cached) {
+//       return res.json(JSON.parse(cached));
+//     }
+
+//     // Verify flash sale exists
+//     const saleCheck = await db.query(
+//       "SELECT id, title, status, start_time, end_time FROM flash_sales WHERE id = $1",
+//       [flashSaleId]
+//     );
+
+//     if (saleCheck.rows.length === 0) {
+//       return res.status(404).json({ error: "Flash sale not found" });
+//     }
+
+//     const flashSale = saleCheck.rows[0];
+
+//     // Determine sort order
+//     let orderBy = "sold_percentage DESC, p.name ASC";
+//     if (sort === "price_asc") {
+//       orderBy = "fsp.sale_price ASC";
+//     } else if (sort === "price_desc") {
+//       orderBy = "fsp.sale_price DESC";
+//     } else if (sort === "discount") {
+//       orderBy = "(fsp.original_price - fsp.sale_price) DESC";
+//     } else if (sort === "stock") {
+//       orderBy = "remaining_quantity DESC";
+//     }
+
+//     const offset = (parseInt(page) - 1) * parseInt(limit);
+
+//     // Get total count
+//     const countResult = await db.query(
+//       `SELECT COUNT(*) as total FROM flash_sale_products WHERE flash_sale_id = $1`,
+//       [flashSaleId]
+//     );
+
+//     const total = parseInt(countResult.rows[0].total);
+
+//     // Get products
+//     const products = await db.query(
+//       `SELECT
+//         p.id,
+//         p.name,
+//         p.images,
+//         p.rating,
+//         p.category,
+//         fsp.id as flash_sale_product_id,
+//         fsp.sale_price,
+//         fsp.original_price,
+//         fsp.max_quantity,
+//         fsp.sold_quantity,
+//         (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
+//         CASE
+//           WHEN fsp.max_quantity > 0
+//           THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
+//           ELSE 0
+//         END as sold_percentage,
+//         ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percent,
+//         pv.id as variant_id
+//        FROM flash_sale_products fsp
+//        JOIN products p ON fsp.product_id = p.id
+//        LEFT JOIN product_variants pv ON pv.product_id = p.id
+//        WHERE fsp.flash_sale_id = $1
+//        ORDER BY ${orderBy}
+//        LIMIT $2 OFFSET $3`,
+//       [flashSaleId, limit, offset]
+//     );
+
+//     const result = {
+//       flashSale: {
+//         id: flashSale.id,
+//         title: flashSale.title,
+//         status: flashSale.status,
+//         start_time: flashSale.start_time,
+//         end_time: flashSale.end_time,
+//       },
+//       products: products.rows,
+//       pagination: {
+//         page: parseInt(page),
+//         limit: parseInt(limit),
+//         total,
+//         pages: Math.ceil(total / parseInt(limit)),
+//       },
+//     };
+
+//     await redis.setex(cacheKey, 60, JSON.stringify(result));
+//     res.json(result);
+//   } catch (error) {
+//     console.error("Get flash sale products error:", error);
+//     res.status(500).json({ error: "Failed to fetch products" });
+//   }
+// };
+
 exports.getFlashSaleProducts = async (req, res) => {
   try {
     const { flashSaleId } = req.params;
@@ -322,6 +427,8 @@ exports.getFlashSaleProducts = async (req, res) => {
       orderBy = "(fsp.original_price - fsp.sale_price) DESC";
     } else if (sort === "stock") {
       orderBy = "remaining_quantity DESC";
+    } else if (sort === "rating") {
+      orderBy = "p.rating DESC";
     }
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -334,7 +441,7 @@ exports.getFlashSaleProducts = async (req, res) => {
 
     const total = parseInt(countResult.rows[0].total);
 
-    // Get products
+    // Get products - Include all necessary fields for FlashSaleCard
     const products = await db.query(
       `SELECT 
         p.id,
@@ -342,6 +449,8 @@ exports.getFlashSaleProducts = async (req, res) => {
         p.images,
         p.rating,
         p.category,
+        p.brand,
+        p.stock_quantity,
         fsp.id as flash_sale_product_id,
         fsp.sale_price,
         fsp.original_price,
@@ -353,8 +462,10 @@ exports.getFlashSaleProducts = async (req, res) => {
           THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
           ELSE 0
         END as sold_percentage,
-        ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percent,
-        pv.id as variant_id
+        ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage,
+        pv.id as variant_id,
+        pv.id as product_variant_id,
+        pv.stock_quantity as variant_stock_quantity
        FROM flash_sale_products fsp
        JOIN products p ON fsp.product_id = p.id
        LEFT JOIN product_variants pv ON pv.product_id = p.id
