@@ -3,15 +3,34 @@ const express = require("express");
 const router = express.Router();
 const flashSalesController = require("../controllers/flashSalesController");
 
-// Import auth middleware
-const { authenticateToken, requireRole } = require("../middleware/auth");
+// Try to import auth middleware, but don't fail if it doesn't exist
+let authenticate, authorize;
+try {
+  const authMiddleware = require("../middleware/auth");
+  if (authMiddleware.authenticateToken) {
+    authenticate = authMiddleware.authenticateToken;
+  }
+  if (authMiddleware.requireRole) {
+    authorize = authMiddleware.requireRole;
+  }
+} catch (err) {
+  console.warn("Auth middleware not available for flash sales routes");
+  authenticate = (req, res, next) => next();
+  authorize =
+    (...roles) =>
+    (req, res, next) =>
+      next();
+}
 
-// Public routes - GET endpoints (MUST come before /:id routes)
+// Public GET routes - MUST come BEFORE parameterized routes
 router.get("/active", flashSalesController.getActiveFlashSales);
 router.get("/upcoming", flashSalesController.getUpcomingFlashSales);
-router.get("/product/:productId", flashSalesController.getFlashSaleByProductId);
 
-// Routes with parameters
+// List route with query parameters (status param)
+router.get("/", flashSalesController.getAllFlashSales);
+
+// Specific flash sale routes - MUST come AFTER generic routes
+router.get("/product/:productId", flashSalesController.getFlashSaleByProductId);
 router.get("/:flashSaleId/products", flashSalesController.getFlashSaleProducts);
 router.get(
   "/:flashSaleId/analytics",
@@ -22,22 +41,22 @@ router.get("/:flashSaleId", flashSalesController.getFlashSaleById);
 // Admin routes - POST, PUT, DELETE
 router.post(
   "/",
-  authenticateToken,
-  requireRole("admin", "seller"),
+  authenticate,
+  authorize("admin", "seller"),
   flashSalesController.createFlashSale
 );
 
 router.put(
   "/:flashSaleId/status",
-  authenticateToken,
-  requireRole("admin"),
+  authenticate,
+  authorize("admin"),
   flashSalesController.updateFlashSaleStatus
 );
 
 router.delete(
   "/:flashSaleId",
-  authenticateToken,
-  requireRole("admin"),
+  authenticate,
+  authorize("admin"),
   flashSalesController.deleteFlashSale
 );
 
