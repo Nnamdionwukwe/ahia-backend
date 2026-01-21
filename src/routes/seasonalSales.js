@@ -10,6 +10,8 @@ const { authenticateToken, requireRole } = require("../middleware/auth");
 // PUBLIC ROUTES (MUST come before /:id routes)
 // ========================================
 
+router.get("/", seasonalSalesController.getAllSeasonalSales);
+
 // Get all active seasonal sales (for homepage)
 router.get("/active", seasonalSalesController.getActiveSeasonalSales);
 
