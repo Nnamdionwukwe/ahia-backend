@@ -171,6 +171,65 @@ exports.getActiveSeasonalSales = async (req, res) => {
   }
 };
 
+// Get all seasonal sales (with status filter for list view)
+exports.getAllSeasonalSales = async (req, res) => {
+  try {
+    const { status } = req.query;
+    const cacheKey = `seasonal_sales:list:${status || "all"}`;
+    const cached = await redis.get(cacheKey);
+
+    if (cached) {
+      return res.json(JSON.parse(cached));
+    }
+
+    const now = new Date();
+    let query = `
+      SELECT ss.*, 
+             COUNT(ssp.id) as total_products,
+             SUM(ssp.sold_quantity) as total_sold,
+             SUM(ssp.max_quantity) as total_quantity
+      FROM seasonal_sales ss
+      LEFT JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
+      WHERE 1=1
+    `;
+
+    const params = [now];
+
+    if (status === "active") {
+      query += ` AND ss.start_time <= $1 AND ss.end_time > $1`;
+    } else if (status === "upcoming") {
+      query += ` AND ss.start_time > $1`;
+    } else if (status === "ended") {
+      query += ` AND ss.end_time <= $1`;
+    }
+
+    query += ` GROUP BY ss.id ORDER BY ss.start_time DESC`;
+
+    const seasonalSales = await db.query(query, params);
+
+    // Calculate time information
+    for (const sale of seasonalSales.rows) {
+      if (new Date(sale.start_time) > now) {
+        sale.starts_in_seconds = Math.floor(
+          (new Date(sale.start_time) - now) / 1000
+        );
+      } else if (new Date(sale.end_time) > now) {
+        sale.time_remaining_seconds = Math.floor(
+          (new Date(sale.end_time) - now) / 1000
+        );
+      }
+    }
+
+    const result = { seasonalSales: seasonalSales.rows };
+    await redis.setex(cacheKey, 120, JSON.stringify(result));
+
+    res.json(result);
+  } catch (error) {
+    console.error("Get all seasonal sales error:", error);
+    res.status(500).json({ error: "Failed to fetch seasonal sales" });
+  }
+};
+
 // Get all active seasonal sales (for homepage)
 exports.getActiveSeasonalSales = async (req, res) => {
   try {
