@@ -2,8 +2,6 @@
 const express = require("express");
 const router = express.Router();
 const seasonalSalesController = require("../controllers/seasonalSalesController");
-
-// Import auth middleware
 const { authenticateToken, requireRole } = require("../middleware/auth");
 
 // ========================================
@@ -13,14 +11,14 @@ const { authenticateToken, requireRole } = require("../middleware/auth");
 // Specific named routes FIRST
 router.get("/active", seasonalSalesController.getActiveSeasonalSales);
 
-// Product-specific routes
+// Product-specific routes - /all route MUST come before /:productId
 router.get(
   "/product/:productId/all",
-  seasonalSalesController.getSeasonalSaleByProductId
+  seasonalSalesController.getAllSeasonalSalesByProductId // Use the ALL function
 );
 router.get(
   "/product/:productId",
-  seasonalSalesController.getSeasonalSaleByProductId
+  seasonalSalesController.getSeasonalSaleByProductId // Use the SINGLE function
 );
 
 // Generic list route
@@ -31,25 +29,12 @@ router.get(
   "/:saleId/products",
   seasonalSalesController.getSeasonalSaleProducts
 );
-
-// Get seasonal sale by ID
 router.get("/:saleId", seasonalSalesController.getSeasonalSaleById);
-
-// In seasonalSales.js routes file
-router.get(
-  "/product/:productId/all",
-  seasonalSalesController.getAllSeasonalSalesByProductId
-);
-router.get(
-  "/product/:productId",
-  seasonalSalesController.getSeasonalSaleByProductId
-);
 
 // ========================================
 // ADMIN ROUTES (Protected)
 // ========================================
 
-// Create new seasonal sale (Admin only)
 router.post(
   "/",
   authenticateToken,
@@ -57,7 +42,6 @@ router.post(
   seasonalSalesController.createSeasonalSale
 );
 
-// Update seasonal sale status (Admin only)
 router.patch(
   "/:saleId/status",
   authenticateToken,
@@ -65,7 +49,6 @@ router.patch(
   seasonalSalesController.updateSeasonalSaleStatus
 );
 
-// Delete seasonal sale (Admin only)
 router.delete(
   "/:saleId",
   authenticateToken,
