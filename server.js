@@ -76,7 +76,7 @@ app.get("/api", (req, res) => {
     endpoints: {
       auth: "/api/auth",
       products: "/api/products",
-      cart: "/api/cart",
+      cart: "/api/cartRoutes",
       reviews: "/api/reviews",
       orders: "/api/orders",
       wishlist: "/api/wishlist",
@@ -156,7 +156,7 @@ let routes = {};
 const routeFiles = [
   { path: "/api/auth", file: "./src/routes/auth", name: "auth" },
   { path: "/api/products", file: "./src/routes/products", name: "products" },
-  { path: "/api/cart", file: "./src/routes/cart", name: "cart" },
+  { path: "/api/cart", file: "./src/routes/cartRoutes", name: "cartRoutes" },
   { path: "/api/reviews", file: "./src/routes/reviews", name: "reviews" },
   { path: "/api/orders", file: "./src/routes/orders", name: "orders" },
   { path: "/api/wishlist", file: "./src/routes/wishlist", name: "wishlist" },
