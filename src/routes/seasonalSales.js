@@ -1,3 +1,69 @@
+// // src/routes/seasonalSales.js
+// const express = require("express");
+// const router = express.Router();
+// const seasonalSalesController = require("../controllers/seasonalSalesController");
+
+// // Import auth middleware
+// const { authenticateToken, requireRole } = require("../middleware/auth");
+
+// // ========================================
+// // PUBLIC ROUTES (MUST come before /:id routes)
+// // ========================================
+
+// router.get("/", seasonalSalesController.getAllSeasonalSales);
+
+// // Get all active seasonal sales (for homepage)
+// router.get("/active", seasonalSalesController.getActiveSeasonalSales);
+
+// // Get seasonal sale for a specific product
+// router.get(
+//   "/product/:productId",
+//   seasonalSalesController.getSeasonalSaleByProductId
+// );
+
+// // ========================================
+// // ROUTES WITH PARAMETERS
+// // ========================================
+
+// // Get products for a specific seasonal sale
+// router.get(
+//   "/:saleId/products",
+//   seasonalSalesController.getSeasonalSaleProducts
+// );
+
+// // Get seasonal sale by ID
+// router.get("/:saleId", seasonalSalesController.getSeasonalSaleById);
+
+// // ========================================
+// // ADMIN ROUTES (Protected)
+// // ========================================
+
+// // Create new seasonal sale (Admin only)
+// router.post(
+//   "/",
+//   authenticateToken,
+//   requireRole("admin"),
+//   seasonalSalesController.createSeasonalSale
+// );
+
+// // Update seasonal sale status (Admin only)
+// router.patch(
+//   "/:saleId/status",
+//   authenticateToken,
+//   requireRole("admin"),
+//   seasonalSalesController.updateSeasonalSaleStatus
+// );
+
+// // Delete seasonal sale (Admin only)
+// router.delete(
+//   "/:saleId",
+//   authenticateToken,
+//   requireRole("admin"),
+//   seasonalSalesController.deleteSeasonalSale
+// );
+
+// module.exports = router;
+
 // src/routes/seasonalSales.js
 const express = require("express");
 const router = express.Router();
@@ -7,25 +73,26 @@ const seasonalSalesController = require("../controllers/seasonalSalesController"
 const { authenticateToken, requireRole } = require("../middleware/auth");
 
 // ========================================
-// PUBLIC ROUTES (MUST come before /:id routes)
+// PUBLIC ROUTES (Order matters!)
 // ========================================
 
-router.get("/", seasonalSalesController.getAllSeasonalSales);
-
-// Get all active seasonal sales (for homepage)
+// Specific named routes FIRST
 router.get("/active", seasonalSalesController.getActiveSeasonalSales);
 
-// Get seasonal sale for a specific product
+// Product-specific routes
+router.get(
+  "/product/:productId/all",
+  seasonalSalesController.getSeasonalSaleByProductId
+);
 router.get(
   "/product/:productId",
   seasonalSalesController.getSeasonalSaleByProductId
 );
 
-// ========================================
-// ROUTES WITH PARAMETERS
-// ========================================
+// Generic list route
+router.get("/", seasonalSalesController.getAllSeasonalSales);
 
-// Get products for a specific seasonal sale
+// Specific seasonal sale routes with :saleId
 router.get(
   "/:saleId/products",
   seasonalSalesController.getSeasonalSaleProducts
