@@ -62,6 +62,65 @@ const { v4: uuidv4 } = require("uuid");
 //   }
 // };
 
+// exports.getSeasonalSaleByProductId = async (req, res) => {
+//   try {
+//     const { productId } = req.params;
+
+//     if (!productId || productId === "undefined") {
+//       return res.json(null);
+//     }
+
+//     const now = new Date();
+
+//     const seasonalSale = await db.query(
+//       `SELECT
+//         ss.id,
+//         ss.name,
+//         ss.description,
+//         ss.start_time,
+//         ss.end_time,
+//         ss.banner_color,
+//         ssp.sale_price,
+//         ssp.original_price,
+//         ssp.max_quantity,
+//         ssp.sold_quantity,
+//         (ssp.max_quantity - ssp.sold_quantity) as remaining_quantity,
+//         ROUND(((ssp.original_price - ssp.sale_price) / ssp.original_price) * 100) as discount_percentage
+//        FROM seasonal_sales ss
+//        JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
+//        WHERE ssp.product_id = $1
+//          AND ss.start_time <= $2
+//          AND ss.end_time > $2
+//        LIMIT 1`,
+//       [productId, now]
+//     );
+
+//     if (seasonalSale.rows.length === 0) {
+//       return res.json(null);
+//     }
+
+//     const sale = seasonalSale.rows[0];
+//     res.json({
+//       id: sale.id,
+//       name: sale.name,
+//       description: sale.description,
+//       start_time: sale.start_time,
+//       end_time: sale.end_time,
+//       banner_color: sale.banner_color,
+//       sale_price: sale.sale_price,
+//       original_price: sale.original_price,
+//       discount_percentage: sale.discount_percentage || 0,
+//       max_quantity: sale.max_quantity,
+//       sold_quantity: sale.sold_quantity,
+//       remaining_quantity: sale.remaining_quantity,
+//     });
+//   } catch (error) {
+//     console.error("Get seasonal sale by product error:", error);
+//     res.json(null);
+//   }
+// };
+
+// Get seasonal sale for a specific product (SEPARATE from flash sales)
 exports.getSeasonalSaleByProductId = async (req, res) => {
   try {
     const { productId } = req.params;
@@ -76,6 +135,7 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
       `SELECT 
         ss.id,
         ss.name,
+        ss.season,
         ss.description,
         ss.start_time,
         ss.end_time,
@@ -103,14 +163,14 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
     res.json({
       id: sale.id,
       name: sale.name,
+      season: sale.season,
       description: sale.description,
       start_time: sale.start_time,
       end_time: sale.end_time,
       banner_color: sale.banner_color,
       sale_price: sale.sale_price,
       original_price: sale.original_price,
-      discount_percentage: sale.discount_percentage || 0,
-      max_quantity: sale.max_quantity,
+      discount_percentage: sale.discount_percentage,
       sold_quantity: sale.sold_quantity,
       remaining_quantity: sale.remaining_quantity,
     });
