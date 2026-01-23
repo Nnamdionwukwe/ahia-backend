@@ -939,5 +939,3 @@ exports.getFlashSaleByProductId = async (req, res) => {
 };
 
 module.exports = exports;
-
-s;
