@@ -139,7 +139,7 @@ exports.getAllSeasonalSalesByProductId = async (req, res) => {
         ss.banner_color,
         ss.start_time,
         ss.end_time,
-        ss.status,
+        ss.is_active = true,
         ssp.sale_price,
         ssp.original_price,
         ssp.max_quantity,
