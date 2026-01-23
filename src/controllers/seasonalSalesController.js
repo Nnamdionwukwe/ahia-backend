@@ -132,7 +132,7 @@ exports.getAllSeasonalSalesByProductId = async (req, res) => {
     const now = new Date();
 
     const seasonalSales = await db.query(
-      `SELECT DISTINCT
+      `SELECT  
         ss.id,
         ss.name,
         ss.season,
