@@ -112,6 +112,13 @@ router.get(
 );
 router.get("/:flashSaleId", flashSalesController.getFlashSaleById);
 
+// Product-specific routes
+router.get(
+  "/product/:productId/all",
+  flashSalesController.getAllFlashSalesByProductId // Use the NEW function
+);
+router.get("/product/:productId", flashSalesController.getFlashSaleByProductId);
+
 // ========================================
 // ADMIN ROUTES - POST, PUT, DELETE
 // ========================================
