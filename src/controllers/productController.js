@@ -96,8 +96,6 @@ exports.getAllProducts = async (req, res) => {
       category,
       page = 1,
       limit = 20,
-      sort = "created_at",
-      order = "DESC",
       minPrice,
       maxPrice,
       search,
@@ -107,7 +105,7 @@ exports.getAllProducts = async (req, res) => {
     const params = [];
     let paramCount = 0;
 
-    // Base query with random seed for consistent shuffling within a request
+    // Base query
     let query = `
       SELECT p.*, 
              COUNT(*) OVER() as total_count
@@ -140,11 +138,10 @@ exports.getAllProducts = async (req, res) => {
       query += ` AND (p.name ILIKE $${paramCount} OR p.description ILIKE $${paramCount})`;
     }
 
-    // ALWAYS use RANDOM() for shuffling on each page load
-    // This ensures different order every time
+    // CRITICAL: Add ORDER BY RANDOM() before LIMIT
     query += ` ORDER BY RANDOM()`;
 
-    // Pagination
+    // Then add pagination
     paramCount++;
     params.push(limit);
     query += ` LIMIT $${paramCount}`;
@@ -153,7 +150,12 @@ exports.getAllProducts = async (req, res) => {
     params.push(offset);
     query += ` OFFSET $${paramCount}`;
 
+    console.log("SQL Query:", query);
+    console.log("Params:", params);
+
     const result = await db.query(query, params);
+
+    console.log(`✅ Returned ${result.rows.length} products (shuffled)`);
 
     res.json({
       products: result.rows,
@@ -164,7 +166,7 @@ exports.getAllProducts = async (req, res) => {
         pages: Math.ceil((result.rows[0]?.total_count || 0) / limit),
       },
       shuffled: true,
-      timestamp: new Date().toISOString(),
+      shuffleTime: new Date().toISOString(),
     });
   } catch (error) {
     console.error("Get all products error:", error);
