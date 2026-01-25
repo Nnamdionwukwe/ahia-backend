@@ -89,7 +89,7 @@ const redis = require("../config/redis");
 //   }
 // };
 
-// Get all products with random shuffle option
+// Get all products with automatic shuffle
 exports.getAllProducts = async (req, res) => {
   try {
     const {
@@ -101,12 +101,96 @@ exports.getAllProducts = async (req, res) => {
       minPrice,
       maxPrice,
       search,
-      shuffle = false, // NEW: Add shuffle parameter
     } = req.query;
 
     const offset = (page - 1) * limit;
     const params = [];
     let paramCount = 0;
+
+    // Base query with random seed for consistent shuffling within a request
+    let query = `
+      SELECT p.*, 
+             COUNT(*) OVER() as total_count
+      FROM products p
+      WHERE 1=1
+    `;
+
+    // Filters
+    if (category) {
+      paramCount++;
+      params.push(category);
+      query += ` AND p.category = $${paramCount}`;
+    }
+
+    if (minPrice) {
+      paramCount++;
+      params.push(minPrice);
+      query += ` AND p.price >= $${paramCount}`;
+    }
+
+    if (maxPrice) {
+      paramCount++;
+      params.push(maxPrice);
+      query += ` AND p.price <= $${paramCount}`;
+    }
+
+    if (search) {
+      paramCount++;
+      params.push(`%${search}%`);
+      query += ` AND (p.name ILIKE $${paramCount} OR p.description ILIKE $${paramCount})`;
+    }
+
+    // ALWAYS use RANDOM() for shuffling on each page load
+    // This ensures different order every time
+    query += ` ORDER BY RANDOM()`;
+
+    // Pagination
+    paramCount++;
+    params.push(limit);
+    query += ` LIMIT $${paramCount}`;
+
+    paramCount++;
+    params.push(offset);
+    query += ` OFFSET $${paramCount}`;
+
+    const result = await db.query(query, params);
+
+    res.json({
+      products: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: result.rows[0]?.total_count || 0,
+        pages: Math.ceil((result.rows[0]?.total_count || 0) / limit),
+      },
+      shuffled: true,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Get all products error:", error);
+    res.status(500).json({ error: "Failed to fetch products" });
+  }
+};
+
+// Alternative: Get products with seeded random (for consistent shuffle per session)
+exports.getProductsSeeded = async (req, res) => {
+  try {
+    const {
+      category,
+      page = 1,
+      limit = 20,
+      seed, // Client can pass a seed for session consistency
+      minPrice,
+      maxPrice,
+      search,
+    } = req.query;
+
+    const offset = (page - 1) * limit;
+    const params = [];
+    let paramCount = 0;
+
+    // Use seed if provided, otherwise use timestamp
+    const randomSeed = seed || Date.now();
 
     // Base query
     let query = `
@@ -141,18 +225,10 @@ exports.getAllProducts = async (req, res) => {
       query += ` AND (p.name ILIKE $${paramCount} OR p.description ILIKE $${paramCount})`;
     }
 
-    // Sorting - Add RANDOM() option
-    if (shuffle === "true" || shuffle === true) {
-      query += ` ORDER BY RANDOM()`; // Random shuffle
-    } else {
-      const validSortFields = ["created_at", "price", "name", "rating"];
-      const validOrders = ["ASC", "DESC"];
-      const sortField = validSortFields.includes(sort) ? sort : "created_at";
-      const sortOrder = validOrders.includes(order.toUpperCase())
-        ? order.toUpperCase()
-        : "DESC";
-      query += ` ORDER BY p.${sortField} ${sortOrder}`;
-    }
+    // Seeded random for consistent results with same seed
+    paramCount++;
+    params.push(randomSeed);
+    query += ` ORDER BY setseed($${paramCount}), RANDOM()`;
 
     // Pagination
     paramCount++;
@@ -173,10 +249,11 @@ exports.getAllProducts = async (req, res) => {
         total: result.rows[0]?.total_count || 0,
         pages: Math.ceil((result.rows[0]?.total_count || 0) / limit),
       },
-      shuffled: shuffle === "true" || shuffle === true,
+      shuffled: true,
+      seed: randomSeed,
     });
   } catch (error) {
-    console.error("Get all products error:", error);
+    console.error("Get products seeded error:", error);
     res.status(500).json({ error: "Failed to fetch products" });
   }
 };
