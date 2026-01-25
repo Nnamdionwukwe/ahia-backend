@@ -5,6 +5,7 @@ const { authenticateUser, requireRole } = require("../middleware/auth");
 
 // Public routes
 router.get("/", productController.getProducts);
+router.get("/test-shuffle", productController.testShuffle);
 router.get("/search", productController.searchProducts);
 router.get("/brands", productController.getBrands);
 router.get("/tags", productController.getTags);

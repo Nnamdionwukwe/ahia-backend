@@ -174,6 +174,29 @@ exports.getAllProducts = async (req, res) => {
   }
 };
 
+// Test endpoint to verify shuffle
+exports.testShuffle = async (req, res) => {
+  try {
+    const result1 = await db.query(`
+      SELECT id, name FROM products ORDER BY RANDOM() LIMIT 5
+    `);
+
+    const result2 = await db.query(`
+      SELECT id, name FROM products ORDER BY RANDOM() LIMIT 5
+    `);
+
+    res.json({
+      message: "If these two arrays are different, shuffle works!",
+      query1: result1.rows,
+      query2: result2.rows,
+      areDifferent:
+        JSON.stringify(result1.rows) !== JSON.stringify(result2.rows),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // Alternative: Get products with seeded random (for consistent shuffle per session)
 exports.getProductsSeeded = async (req, res) => {
   try {
