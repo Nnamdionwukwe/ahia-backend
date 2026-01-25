@@ -90,12 +90,101 @@ const redis = require("../config/redis");
 // };
 
 // Get all products with automatic shuffle
+// exports.getAllProducts = async (req, res) => {
+//   try {
+//     const {
+//       category,
+//       page = 1,
+//       limit = 20000,
+//       minPrice,
+//       maxPrice,
+//       search,
+//     } = req.query;
+
+//     const offset = (page - 1) * limit;
+//     const params = [];
+//     let paramCount = 0;
+
+//     // Base query
+//     let query = `
+//       SELECT p.*,
+//              COUNT(*) OVER() as total_count
+//       FROM products p
+//       WHERE 1=1
+//     `;
+
+//     // Filters
+//     if (category) {
+//       paramCount++;
+//       params.push(category);
+//       query += ` AND p.category = $${paramCount}`;
+//     }
+
+//     if (minPrice) {
+//       paramCount++;
+//       params.push(minPrice);
+//       query += ` AND p.price >= $${paramCount}`;
+//     }
+
+//     if (maxPrice) {
+//       paramCount++;
+//       params.push(maxPrice);
+//       query += ` AND p.price <= $${paramCount}`;
+//     }
+
+//     if (search) {
+//       paramCount++;
+//       params.push(`%${search}%`);
+//       query += ` AND (p.name ILIKE $${paramCount} OR p.description ILIKE $${paramCount})`;
+//     }
+
+//     // CRITICAL: Add ORDER BY RANDOM() before LIMIT
+//     query += ` ORDER BY RANDOM()`;
+
+//     // Then add pagination
+//     paramCount++;
+//     params.push(limit);
+//     query += ` LIMIT $${paramCount}`;
+
+//     paramCount++;
+//     params.push(offset);
+//     query += ` OFFSET $${paramCount}`;
+
+//     console.log("SQL Query:", query);
+//     console.log("Params:", params);
+
+//     const result = await db.query(query, params);
+
+//     console.log(`✅ Returned ${result.rows.length} products (shuffled)`);
+
+//     res.json({
+//       products: result.rows,
+//       pagination: {
+//         page: parseInt(page),
+//         limit: parseInt(limit),
+//         total: result.rows[0]?.total_count || 0,
+//         pages: Math.ceil((result.rows[0]?.total_count || 0) / limit),
+//       },
+//       shuffled: true,
+//       shuffleTime: new Date().toISOString(),
+//     });
+//   } catch (error) {
+//     console.error("Get all products error:", error);
+//     res.status(500).json({ error: "Failed to fetch products" });
+//   }
+// };
+
+// Update your getProducts function in productController.js
+// Replace your getAllProducts function in productController.js
+
 exports.getAllProducts = async (req, res) => {
   try {
     const {
       category,
       page = 1,
-      limit = 20000,
+      limit = 20,
+      sort = "created_at",
+      order = "DESC",
       minPrice,
       maxPrice,
       search,
@@ -107,7 +196,7 @@ exports.getAllProducts = async (req, res) => {
 
     // Base query
     let query = `
-      SELECT p.*,
+      SELECT p.*, 
              COUNT(*) OVER() as total_count
       FROM products p
       WHERE 1=1
@@ -138,10 +227,22 @@ exports.getAllProducts = async (req, res) => {
       query += ` AND (p.name ILIKE $${paramCount} OR p.description ILIKE $${paramCount})`;
     }
 
-    // CRITICAL: Add ORDER BY RANDOM() before LIMIT
-    query += ` ORDER BY RANDOM()`;
+    // ✅ Sorting - Check if shuffle is requested
+    const isShuffled = sort === "shuffle" || sort === "random";
 
-    // Then add pagination
+    if (isShuffled) {
+      query += ` ORDER BY RANDOM()`;
+    } else {
+      const validSortFields = ["created_at", "price", "name", "rating"];
+      const validOrders = ["ASC", "DESC"];
+      const sortField = validSortFields.includes(sort) ? sort : "created_at";
+      const sortOrder = validOrders.includes(order.toUpperCase())
+        ? order.toUpperCase()
+        : "DESC";
+      query += ` ORDER BY p.${sortField} ${sortOrder}`;
+    }
+
+    // Pagination
     paramCount++;
     params.push(limit);
     query += ` LIMIT $${paramCount}`;
@@ -150,13 +251,18 @@ exports.getAllProducts = async (req, res) => {
     params.push(offset);
     query += ` OFFSET $${paramCount}`;
 
-    console.log("SQL Query:", query);
-    console.log("Params:", params);
+    console.log("📊 SQL Query:", query.substring(0, 200) + "...");
+    console.log("🔀 Shuffle requested:", isShuffled);
 
     const result = await db.query(query, params);
 
-    console.log(`✅ Returned ${result.rows.length} products (shuffled)`);
+    console.log(
+      `✅ Returned ${result.rows.length} products ${
+        isShuffled ? "(shuffled)" : ""
+      }`
+    );
 
+    // ✅ Return with shuffle information
     res.json({
       products: result.rows,
       pagination: {
@@ -165,95 +271,15 @@ exports.getAllProducts = async (req, res) => {
         total: result.rows[0]?.total_count || 0,
         pages: Math.ceil((result.rows[0]?.total_count || 0) / limit),
       },
-      shuffled: true,
+      shuffled: isShuffled,
       shuffleTime: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error("Get all products error:", error);
     res.status(500).json({ error: "Failed to fetch products" });
   }
 };
-
-// Update your getProducts function in productController.js
-// exports.getProducts = async (req, res) => {
-//   try {
-//     const { category, brand, sort, page = 1, limit = 20 } = req.query;
-//     const offset = (page - 1) * limit;
-
-//     let query = `
-//       SELECT p.id, p.name, p.price, p.original_price, p.discount_percentage,
-//              p.images, p.rating, p.total_reviews, p.brand, p.tags, p.created_at,
-//              s.store_name, s.rating as seller_rating
-//       FROM products p
-//       LEFT JOIN sellers s ON p.seller_id = s.id
-//       WHERE p.stock_quantity > 0
-//     `;
-
-//     const params = [];
-
-//     if (category) {
-//       query += ` AND p.category = $${params.length + 1}`;
-//       params.push(category);
-//     }
-
-//     if (brand) {
-//       query += ` AND p.brand = $${params.length + 1}`;
-//       params.push(brand);
-//     }
-
-//     // ✅ Add shuffle by default or based on sort parameter
-//     if (!sort || sort === "shuffle" || sort === "random") {
-//       query += " ORDER BY RANDOM()";
-//     } else if (sort === "price_asc") {
-//       query += " ORDER BY p.price ASC";
-//     } else if (sort === "price_desc") {
-//       query += " ORDER BY p.price DESC";
-//     } else if (sort === "rating") {
-//       query += " ORDER BY p.rating DESC";
-//     } else {
-//       query += " ORDER BY p.created_at DESC";
-//     }
-
-//     query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-//     params.push(limit, offset);
-
-//     const products = await db.query(query, params);
-
-//     // Get total count
-//     let countQuery =
-//       "SELECT COUNT(*) as total FROM products WHERE stock_quantity > 0";
-//     const countParams = [];
-
-//     if (category) {
-//       countQuery += ` AND category = $${countParams.length + 1}`;
-//       countParams.push(category);
-//     }
-
-//     if (brand) {
-//       countQuery += ` AND brand = $${countParams.length + 1}`;
-//       countParams.push(brand);
-//     }
-
-//     const countResult = await db.query(countQuery, countParams);
-
-//     // ✅ Return consistent structure with shuffle info
-//     res.json({
-//       data: products.rows,
-//       pagination: {
-//         page: parseInt(page),
-//         limit: parseInt(limit),
-//         total: parseInt(countResult.rows[0].total),
-//         pages: Math.ceil(countResult.rows[0].total / limit),
-//       },
-//       shuffled: !sort || sort === "shuffle" || sort === "random",
-//       shuffleTime: new Date().toISOString(),
-//       timestamp: new Date().toISOString(),
-//     });
-//   } catch (error) {
-//     console.error("Get products error:", error);
-//     res.status(500).json({ error: "Failed to fetch products" });
-//   }
-// };
 
 // Test endpoint to verify shuffle
 exports.testShuffle = async (req, res) => {
