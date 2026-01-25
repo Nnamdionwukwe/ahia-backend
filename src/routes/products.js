@@ -1,10 +1,12 @@
+// src/routes/products.js
 const express = require("express");
 const router = express.Router();
 const productController = require("../controllers/productController");
 const { authenticateUser, requireRole } = require("../middleware/auth");
 
 // Public routes
-router.get("/", productController.getProducts);
+// ✅ CHANGED: Use getAllProducts instead of getProducts
+router.get("/", productController.getAllProducts);
 router.get("/test-shuffle", productController.testShuffle);
 router.get("/search", productController.searchProducts);
 router.get("/brands", productController.getBrands);
