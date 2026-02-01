@@ -63,6 +63,7 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
 };
 
 // Get ALL seasonal sales for a specific product
+// Get ALL seasonal sales for a specific product
 exports.getAllSeasonalSalesByProductId = async (req, res) => {
   try {
     const { productId } = req.params;
@@ -78,16 +79,18 @@ exports.getAllSeasonalSalesByProductId = async (req, res) => {
         ss.id,
         ss.name,
         ss.season,
+        ss.description,
         ss.banner_color,
         ss.start_time,
         ss.end_time,
-        ss.is_active = true,
+        ss.discount_percentage,
+        ss.is_active,
         ssp.sale_price,
         ssp.original_price,
         ssp.max_quantity,
         ssp.sold_quantity,
         (ssp.max_quantity - ssp.sold_quantity) as remaining_quantity,
-        ROUND(((ssp.original_price - ssp.sale_price) / ssp.original_price) * 100) as discount_percentage
+        ROUND(((ssp.original_price - ssp.sale_price) / ssp.original_price) * 100) as product_discount_percentage
        FROM seasonal_sales ss
        JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
        WHERE ssp.product_id = $1
@@ -102,12 +105,61 @@ exports.getAllSeasonalSalesByProductId = async (req, res) => {
       [productId, now],
     );
 
+    console.log(
+      `📊 Found ${seasonalSales.rows.length} seasonal sales for product ${productId}`,
+    );
+
     res.json(seasonalSales.rows);
   } catch (error) {
     console.error("Get all seasonal sales by product error:", error);
     res.json([]);
   }
 };
+// exports.getAllSeasonalSalesByProductId = async (req, res) => {
+//   try {
+//     const { productId } = req.params;
+
+//     if (!productId || productId === "undefined") {
+//       return res.json([]);
+//     }
+
+//     const now = new Date();
+
+//     const seasonalSales = await db.query(
+//       `SELECT
+//         ss.id,
+//         ss.name,
+//         ss.season,
+//         ss.banner_color,
+//         ss.start_time,
+//         ss.end_time,
+//         ss.is_active = true,
+//         ssp.sale_price,
+//         ssp.original_price,
+//         ssp.max_quantity,
+//         ssp.sold_quantity,
+//         (ssp.max_quantity - ssp.sold_quantity) as remaining_quantity,
+//         ROUND(((ssp.original_price - ssp.sale_price) / ssp.original_price) * 100) as discount_percentage
+//        FROM seasonal_sales ss
+//        JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
+//        WHERE ssp.product_id = $1
+//          AND ss.end_time > $2
+//        ORDER BY
+//          CASE
+//            WHEN ss.start_time <= $2 AND ss.end_time > $2 THEN 1
+//            WHEN ss.start_time > $2 THEN 2
+//            ELSE 3
+//          END,
+//          ss.start_time ASC`,
+//       [productId, now],
+//     );
+
+//     res.json(seasonalSales.rows);
+//   } catch (error) {
+//     console.error("Get all seasonal sales by product error:", error);
+//     res.json([]);
+//   }
+// };
 
 // Get seasonal sale for a specific product (SEPARATE from flash sales)
 // exports.getSeasonalSaleByProductId = async (req, res) => {
