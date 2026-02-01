@@ -134,7 +134,7 @@ exports.getActiveFlashSales = async (req, res) => {
          AND start_time <= $1
          AND end_time > $1
        ORDER BY created_at DESC`,
-      [now]
+      [now],
     );
 
     if (flashSales.rows.length === 0) {
@@ -171,7 +171,7 @@ exports.getActiveFlashSales = async (req, res) => {
              AND (fsp.max_quantity - fsp.sold_quantity) > 0
            ORDER BY fsp.sold_quantity DESC
            LIMIT 10`,
-          [sale.id]
+          [sale.id],
         );
 
         return {
@@ -185,10 +185,10 @@ exports.getActiveFlashSales = async (req, res) => {
           products: products.rows,
           time_remaining_seconds: Math.max(
             0,
-            Math.floor((new Date(sale.end_time) - now) / 1000)
+            Math.floor((new Date(sale.end_time) - now) / 1000),
           ),
         };
-      })
+      }),
     );
 
     const result = { flashSales: flashSalesWithProducts };
@@ -246,11 +246,11 @@ exports.getAllFlashSales = async (req, res) => {
     for (const sale of flashSales.rows) {
       if (new Date(sale.start_time) > now) {
         sale.starts_in_seconds = Math.floor(
-          (new Date(sale.start_time) - now) / 1000
+          (new Date(sale.start_time) - now) / 1000,
         );
       } else if (new Date(sale.end_time) > now) {
         sale.time_remaining_seconds = Math.floor(
-          (new Date(sale.end_time) - now) / 1000
+          (new Date(sale.end_time) - now) / 1000,
         );
       }
     }
@@ -284,7 +284,7 @@ exports.getUpcomingFlashSales = async (req, res) => {
          AND status = 'scheduled'
        ORDER BY start_time ASC
        LIMIT 10`,
-      [now]
+      [now],
     );
 
     const upcomingWithTime = upcoming.rows.map((sale) => ({
@@ -401,7 +401,7 @@ exports.getFlashSaleById = async (req, res) => {
     // Get flash sale
     const flashSale = await db.query(
       `SELECT * FROM flash_sales WHERE id = $1`,
-      [flashSaleId]
+      [flashSaleId],
     );
 
     if (flashSale.rows.length === 0) {
@@ -436,7 +436,7 @@ exports.getFlashSaleById = async (req, res) => {
        JOIN products p ON fsp.product_id = p.id
        WHERE fsp.flash_sale_id = $1
        ORDER BY p.id, fsp.sold_quantity DESC`,
-      [flashSaleId]
+      [flashSaleId],
     );
 
     const now = new Date();
@@ -446,7 +446,7 @@ exports.getFlashSaleById = async (req, res) => {
         products: products.rows,
         time_remaining_seconds: Math.max(
           0,
-          Math.floor((new Date(sale.end_time) - now) / 1000)
+          Math.floor((new Date(sale.end_time) - now) / 1000),
         ),
       },
     };
@@ -498,13 +498,139 @@ exports.getAllFlashSalesByProductId = async (req, res) => {
            ELSE 3
          END,
          fs.start_time ASC`,
-      [productId, now]
+      [productId, now],
     );
 
     res.json(flashSales.rows);
   } catch (error) {
     console.error("Get all flash sales by product error:", error);
     res.json([]);
+  }
+};
+
+exports.getFlashSaleProducts = async (req, res) => {
+  try {
+    const { flashSaleId } = req.params;
+    const { page = 1, limit = 20, sort = "shuffle" } = req.query;
+
+    if (!flashSaleId || flashSaleId === "undefined") {
+      return res.status(400).json({ error: "Valid flash sale ID is required" });
+    }
+
+    // ✅ Don't cache shuffled results
+    const isShuffled = sort === "shuffle" || sort === "random";
+    const cacheKey = `flash_sale:${flashSaleId}:products:${page}:${limit}:${sort}`;
+
+    if (!isShuffled) {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return res.json(JSON.parse(cached));
+      }
+    }
+
+    // Verify flash sale exists
+    const saleCheck = await db.query(
+      "SELECT id, title, status, start_time, end_time FROM flash_sales WHERE id = $1",
+      [flashSaleId],
+    );
+
+    if (saleCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Flash sale not found" });
+    }
+
+    const flashSale = saleCheck.rows[0];
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get total count
+    const countResult = await db.query(
+      `SELECT COUNT(*) as total FROM flash_sale_products WHERE flash_sale_id = $1`,
+      [flashSaleId],
+    );
+
+    const total = parseInt(countResult.rows[0].total);
+
+    // ✅ Build ORDER BY — shuffle or named sort
+    let orderBy;
+    if (isShuffled) {
+      orderBy = "RANDOM()";
+    } else if (sort === "price_asc") {
+      orderBy = "fsp.sale_price ASC";
+    } else if (sort === "price_desc") {
+      orderBy = "fsp.sale_price DESC";
+    } else if (sort === "discount") {
+      orderBy =
+        "((fsp.original_price - fsp.sale_price) / fsp.original_price) DESC";
+    } else if (sort === "stock") {
+      orderBy = "(fsp.max_quantity - fsp.sold_quantity) DESC";
+    } else if (sort === "rating") {
+      orderBy = "p.rating DESC";
+    } else if (sort === "popularity") {
+      orderBy = "fsp.sold_quantity DESC, p.name ASC";
+    } else {
+      orderBy = "RANDOM()";
+    }
+
+    const products = await db.query(
+      `SELECT 
+        p.id,
+        p.id as product_id,
+        p.name,
+        p.images,
+        p.rating,
+        p.category,
+        p.brand,
+        p.stock_quantity,
+        p.total_reviews,
+        p.discount_percentage as product_discount,
+        fsp.id as flash_sale_product_id,
+        fsp.sale_price,
+        fsp.original_price,
+        fsp.max_quantity,
+        fsp.sold_quantity,
+        (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
+        CASE 
+          WHEN fsp.max_quantity > 0 
+          THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
+          ELSE 0
+        END as sold_percentage,
+        ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage
+       FROM flash_sale_products fsp
+       JOIN products p ON fsp.product_id = p.id
+       WHERE fsp.flash_sale_id = $1
+       ORDER BY ${orderBy}
+       LIMIT $2 OFFSET $3`,
+      [flashSaleId, limit, offset],
+    );
+
+    const result = {
+      flashSale: {
+        id: flashSale.id,
+        title: flashSale.title,
+        status: flashSale.status,
+        start_time: flashSale.start_time,
+        end_time: flashSale.end_time,
+      },
+      products: products.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+      shuffled: isShuffled,
+      shuffleTime: new Date().toISOString(),
+    };
+
+    // ✅ Only cache non-shuffled results
+    if (!isShuffled) {
+      await redis.setex(cacheKey, 60, JSON.stringify(result));
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error("Get flash sale products error:", error);
+    res.status(500).json({ error: "Failed to fetch products" });
   }
 };
 
@@ -626,120 +752,120 @@ exports.getAllFlashSalesByProductId = async (req, res) => {
 // Update these two functions in flashSalesController.js
 
 // 1. Update getFlashSaleProducts function
-exports.getFlashSaleProducts = async (req, res) => {
-  try {
-    const { flashSaleId } = req.params;
-    const { page = 1, limit = 20, sort = "popularity" } = req.query;
+// exports.getFlashSaleProducts = async (req, res) => {
+//   try {
+//     const { flashSaleId } = req.params;
+//     const { page = 1, limit = 20, sort = "popularity" } = req.query;
 
-    if (!flashSaleId || flashSaleId === "undefined") {
-      return res.status(400).json({ error: "Valid flash sale ID is required" });
-    }
+//     if (!flashSaleId || flashSaleId === "undefined") {
+//       return res.status(400).json({ error: "Valid flash sale ID is required" });
+//     }
 
-    const cacheKey = `flash_sale:${flashSaleId}:products:${page}:${limit}:${sort}`;
-    const cached = await redis.get(cacheKey);
+//     const cacheKey = `flash_sale:${flashSaleId}:products:${page}:${limit}:${sort}`;
+//     const cached = await redis.get(cacheKey);
 
-    if (cached) {
-      return res.json(JSON.parse(cached));
-    }
+//     if (cached) {
+//       return res.json(JSON.parse(cached));
+//     }
 
-    // Verify flash sale exists
-    const saleCheck = await db.query(
-      "SELECT id, title, status, start_time, end_time FROM flash_sales WHERE id = $1",
-      [flashSaleId]
-    );
+//     // Verify flash sale exists
+//     const saleCheck = await db.query(
+//       "SELECT id, title, status, start_time, end_time FROM flash_sales WHERE id = $1",
+//       [flashSaleId]
+//     );
 
-    if (saleCheck.rows.length === 0) {
-      return res.status(404).json({ error: "Flash sale not found" });
-    }
+//     if (saleCheck.rows.length === 0) {
+//       return res.status(404).json({ error: "Flash sale not found" });
+//     }
 
-    const flashSale = saleCheck.rows[0];
+//     const flashSale = saleCheck.rows[0];
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+//     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    // Get total count
-    const countResult = await db.query(
-      `SELECT COUNT(*) as total FROM flash_sale_products WHERE flash_sale_id = $1`,
-      [flashSaleId]
-    );
+//     // Get total count
+//     const countResult = await db.query(
+//       `SELECT COUNT(*) as total FROM flash_sale_products WHERE flash_sale_id = $1`,
+//       [flashSaleId]
+//     );
 
-    const total = parseInt(countResult.rows[0].total);
+//     const total = parseInt(countResult.rows[0].total);
 
-    // ✅ Build the query with ALL necessary fields
-    let query = `
-      SELECT 
-        p.id,
-        p.id as product_id,
-        p.name,
-        p.images,
-        p.rating,
-        p.category,
-        p.brand,
-        p.stock_quantity,
-        p.total_reviews,
-        p.discount_percentage as product_discount,
-        fsp.id as flash_sale_product_id,
-        fsp.sale_price,
-        fsp.original_price,
-        fsp.max_quantity,
-        fsp.sold_quantity,
-        (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
-        CASE 
-          WHEN fsp.max_quantity > 0 
-          THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
-          ELSE 0
-        END as sold_percentage,
-        ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage
-       FROM flash_sale_products fsp
-       JOIN products p ON fsp.product_id = p.id
-       WHERE fsp.flash_sale_id = $1
-    `;
+//     // ✅ Build the query with ALL necessary fields
+//     let query = `
+//       SELECT
+//         p.id,
+//         p.id as product_id,
+//         p.name,
+//         p.images,
+//         p.rating,
+//         p.category,
+//         p.brand,
+//         p.stock_quantity,
+//         p.total_reviews,
+//         p.discount_percentage as product_discount,
+//         fsp.id as flash_sale_product_id,
+//         fsp.sale_price,
+//         fsp.original_price,
+//         fsp.max_quantity,
+//         fsp.sold_quantity,
+//         (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
+//         CASE
+//           WHEN fsp.max_quantity > 0
+//           THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
+//           ELSE 0
+//         END as sold_percentage,
+//         ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage
+//        FROM flash_sale_products fsp
+//        JOIN products p ON fsp.product_id = p.id
+//        WHERE fsp.flash_sale_id = $1
+//     `;
 
-    // Add ORDER BY clause based on sort parameter
-    if (sort === "price_asc") {
-      query += " ORDER BY fsp.sale_price ASC, p.name ASC";
-    } else if (sort === "price_desc") {
-      query += " ORDER BY fsp.sale_price DESC, p.name ASC";
-    } else if (sort === "discount") {
-      query +=
-        " ORDER BY (fsp.original_price - fsp.sale_price) DESC, p.name ASC";
-    } else if (sort === "stock") {
-      query +=
-        " ORDER BY (fsp.max_quantity - fsp.sold_quantity) DESC, p.name ASC";
-    } else if (sort === "rating") {
-      query += " ORDER BY p.rating DESC, p.name ASC";
-    } else {
-      // Default: popularity (sold quantity)
-      query += " ORDER BY fsp.sold_quantity DESC, p.name ASC";
-    }
+//     // Add ORDER BY clause based on sort parameter
+//     if (sort === "price_asc") {
+//       query += " ORDER BY fsp.sale_price ASC, p.name ASC";
+//     } else if (sort === "price_desc") {
+//       query += " ORDER BY fsp.sale_price DESC, p.name ASC";
+//     } else if (sort === "discount") {
+//       query +=
+//         " ORDER BY (fsp.original_price - fsp.sale_price) DESC, p.name ASC";
+//     } else if (sort === "stock") {
+//       query +=
+//         " ORDER BY (fsp.max_quantity - fsp.sold_quantity) DESC, p.name ASC";
+//     } else if (sort === "rating") {
+//       query += " ORDER BY p.rating DESC, p.name ASC";
+//     } else {
+//       // Default: popularity (sold quantity)
+//       query += " ORDER BY fsp.sold_quantity DESC, p.name ASC";
+//     }
 
-    query += " LIMIT $2 OFFSET $3";
+//     query += " LIMIT $2 OFFSET $3";
 
-    const products = await db.query(query, [flashSaleId, limit, offset]);
+//     const products = await db.query(query, [flashSaleId, limit, offset]);
 
-    const result = {
-      flashSale: {
-        id: flashSale.id,
-        title: flashSale.title,
-        status: flashSale.status,
-        start_time: flashSale.start_time,
-        end_time: flashSale.end_time,
-      },
-      products: products.rows,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit)),
-      },
-    };
+//     const result = {
+//       flashSale: {
+//         id: flashSale.id,
+//         title: flashSale.title,
+//         status: flashSale.status,
+//         start_time: flashSale.start_time,
+//         end_time: flashSale.end_time,
+//       },
+//       products: products.rows,
+//       pagination: {
+//         page: parseInt(page),
+//         limit: parseInt(limit),
+//         total,
+//         pages: Math.ceil(total / parseInt(limit)),
+//       },
+//     };
 
-    await redis.setex(cacheKey, 60, JSON.stringify(result));
-    res.json(result);
-  } catch (error) {
-    console.error("Get flash sale products error:", error);
-    res.status(500).json({ error: "Failed to fetch products" });
-  }
-};
+//     await redis.setex(cacheKey, 60, JSON.stringify(result));
+//     res.json(result);
+//   } catch (error) {
+//     console.error("Get flash sale products error:", error);
+//     res.status(500).json({ error: "Failed to fetch products" });
+//   }
+// };
 
 exports.getFlashSaleDetails = async (req, res) => {
   return exports.getFlashSaleById(req, res);
@@ -798,7 +924,7 @@ exports.createFlashSale = async (req, res) => {
                                  discount_percentage, status, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, 'scheduled', NOW())
        RETURNING *`,
-      [flashSaleId, title, description, startTime, endTime, discountPercentage]
+      [flashSaleId, title, description, startTime, endTime, discountPercentage],
     );
 
     // Add products
@@ -818,7 +944,7 @@ exports.createFlashSale = async (req, res) => {
           productId,
           discountPercentage,
           maxQuantity || 100,
-        ]
+        ],
       );
 
       if (product.rows.length > 0) {
@@ -860,7 +986,7 @@ exports.updateFlashSaleStatus = async (req, res) => {
 
     const updated = await db.query(
       `UPDATE flash_sales SET status = $1 WHERE id = $2 RETURNING *`,
-      [status, flashSaleId]
+      [status, flashSaleId],
     );
 
     if (updated.rows.length === 0) {
@@ -890,7 +1016,7 @@ exports.deleteFlashSale = async (req, res) => {
 
     const flashSale = await db.query(
       "SELECT status, start_time FROM flash_sales WHERE id = $1",
-      [flashSaleId]
+      [flashSaleId],
     );
 
     if (flashSale.rows.length === 0) {
@@ -949,7 +1075,7 @@ exports.getFlashSaleAnalytics = async (req, res) => {
        LEFT JOIN flash_sale_products fsp ON fs.id = fsp.flash_sale_id
        WHERE fs.id = $1
        GROUP BY fs.id`,
-      [flashSaleId]
+      [flashSaleId],
     );
 
     if (analytics.rows.length === 0) {
@@ -969,7 +1095,7 @@ exports.getFlashSaleAnalytics = async (req, res) => {
        WHERE fsp.flash_sale_id = $1
        ORDER BY sold_percentage DESC, revenue DESC
        LIMIT 10`,
-      [flashSaleId]
+      [flashSaleId],
     );
 
     res.json({
@@ -1016,7 +1142,7 @@ exports.getFlashSaleByProductId = async (req, res) => {
          AND fs.start_time <= $2
          AND fs.end_time > $2
        LIMIT 1`,
-      [productId, now]
+      [productId, now],
     );
 
     if (flashSale.rows.length === 0) {
