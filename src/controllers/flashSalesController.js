@@ -270,17 +270,19 @@ exports.getFlashSaleById = async (req, res) => {
   }
 };
 
-// Get ALL flash sales for a specific product (not just one)
-// Get ALL flash sales for a specific product
+// Get ALL flash sales for a specific product (returns ARRAY, not single object)
 exports.getAllFlashSalesByProductId = async (req, res) => {
   try {
     const { productId } = req.params;
 
     if (!productId || productId === "undefined") {
+      console.log("❌ Invalid product ID provided");
       return res.json([]);
     }
 
     const now = new Date();
+
+    console.log(`🔍 Fetching ALL flash sales for product: ${productId}`);
 
     const flashSales = await db.query(
       `SELECT DISTINCT
@@ -313,12 +315,17 @@ exports.getAllFlashSalesByProductId = async (req, res) => {
     );
 
     console.log(
-      `📊 Found ${flashSales.rows.length} flash sales for product ${productId}`,
+      `✅ Found ${flashSales.rows.length} flash sales for product ${productId}`,
     );
 
-    res.json(flashSales.rows);
+    // CRITICAL: Always return an array, never a single object
+    const salesArray = flashSales.rows || [];
+
+    console.log(`📤 Returning array with ${salesArray.length} flash sales`);
+
+    res.json(salesArray);
   } catch (error) {
-    console.error("Get all flash sales by product error:", error);
+    console.error("❌ Get all flash sales by product error:", error);
     res.json([]);
   }
 };
