@@ -14,11 +14,12 @@ router.get("/active", seasonalSalesController.getActiveSeasonalSales);
 // Product-specific routes - /all route MUST come before /:productId
 router.get(
   "/product/:productId/all",
-  seasonalSalesController.getAllSeasonalSalesByProductId // Use the ALL function
+  seasonalSalesController.getAllSeasonalSalesByProductId, // Use the ALL function
 );
+
 router.get(
   "/product/:productId",
-  seasonalSalesController.getSeasonalSaleByProductId // Use the SINGLE function
+  seasonalSalesController.getSeasonalSaleByProductId, // Use the SINGLE function
 );
 
 // Generic list route
@@ -27,7 +28,7 @@ router.get("/", seasonalSalesController.getAllSeasonalSales);
 // Specific seasonal sale routes with :saleId
 router.get(
   "/:saleId/products",
-  seasonalSalesController.getSeasonalSaleProducts
+  seasonalSalesController.getSeasonalSaleProducts,
 );
 router.get("/:saleId", seasonalSalesController.getSeasonalSaleById);
 
@@ -39,21 +40,21 @@ router.post(
   "/",
   authenticateToken,
   requireRole("admin"),
-  seasonalSalesController.createSeasonalSale
+  seasonalSalesController.createSeasonalSale,
 );
 
 router.patch(
   "/:saleId/status",
   authenticateToken,
   requireRole("admin"),
-  seasonalSalesController.updateSeasonalSaleStatus
+  seasonalSalesController.updateSeasonalSaleStatus,
 );
 
 router.delete(
   "/:saleId",
   authenticateToken,
   requireRole("admin"),
-  seasonalSalesController.deleteSeasonalSale
+  seasonalSalesController.deleteSeasonalSale,
 );
 
 module.exports = router;
