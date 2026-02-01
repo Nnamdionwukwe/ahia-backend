@@ -530,7 +530,7 @@ exports.getFlashSaleProducts = async (req, res) => {
 
     // Verify flash sale exists
     const saleCheck = await db.query(
-      "SELECT id, title, status, start_time, end_time FROM flash_sales WHERE id = $1",
+      "SELECT id, title, description, status, start_time, end_time, discount_percentage FROM flash_sales WHERE id = $1",
       [flashSaleId],
     );
 
@@ -571,8 +571,9 @@ exports.getFlashSaleProducts = async (req, res) => {
       orderBy = "RANDOM()";
     }
 
+    // ✅ Main query — mirrors seasonal sale structure exactly
     const products = await db.query(
-      `SELECT 
+      `SELECT
         p.id,
         p.id as product_id,
         p.name,
@@ -583,20 +584,24 @@ exports.getFlashSaleProducts = async (req, res) => {
         p.stock_quantity,
         p.total_reviews,
         p.discount_percentage as product_discount,
+        fs.status,
+        fs.title as sale_title,
+        fs.discount_percentage as sale_discount_percentage,
         fsp.id as flash_sale_product_id,
         fsp.sale_price,
         fsp.original_price,
         fsp.max_quantity,
         fsp.sold_quantity,
         (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
-        CASE 
-          WHEN fsp.max_quantity > 0 
+        CASE
+          WHEN fsp.max_quantity > 0
           THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
           ELSE 0
         END as sold_percentage,
         ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage
        FROM flash_sale_products fsp
        JOIN products p ON fsp.product_id = p.id
+       JOIN flash_sales fs ON fsp.flash_sale_id = fs.id
        WHERE fsp.flash_sale_id = $1
        ORDER BY ${orderBy}
        LIMIT $2 OFFSET $3`,
@@ -607,9 +612,11 @@ exports.getFlashSaleProducts = async (req, res) => {
       flashSale: {
         id: flashSale.id,
         title: flashSale.title,
+        description: flashSale.description,
         status: flashSale.status,
         start_time: flashSale.start_time,
         end_time: flashSale.end_time,
+        discount_percentage: flashSale.discount_percentage,
       },
       products: products.rows,
       pagination: {
