@@ -34,7 +34,7 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
          AND ss.start_time <= $2
          AND ss.end_time > $2
        LIMIT 1`,
-      [productId, now]
+      [productId, now],
     );
 
     if (seasonalSale.rows.length === 0) {
@@ -99,7 +99,7 @@ exports.getAllSeasonalSalesByProductId = async (req, res) => {
            ELSE 3
          END,
          ss.start_time ASC`,
-      [productId, now]
+      [productId, now],
     );
 
     res.json(seasonalSales.rows);
@@ -141,7 +141,7 @@ exports.getSeasonalSaleByProductId = async (req, res) => {
          AND ss.start_time <= $2
          AND ss.end_time > $2
        LIMIT 1`,
-      [productId, now]
+      [productId, now],
     );
 
     if (seasonalSale.rows.length === 0) {
@@ -200,7 +200,7 @@ exports.getActiveSeasonalSales = async (req, res) => {
          AND ss.end_time > $1
        GROUP BY ss.id
        ORDER BY ss.created_at DESC`,
-      [now]
+      [now],
     );
 
     if (seasonalSales.rows.length === 0) {
@@ -260,11 +260,11 @@ exports.getAllSeasonalSales = async (req, res) => {
     for (const sale of seasonalSales.rows) {
       if (new Date(sale.start_time) > now) {
         sale.starts_in_seconds = Math.floor(
-          (new Date(sale.start_time) - now) / 1000
+          (new Date(sale.start_time) - now) / 1000,
         );
       } else if (new Date(sale.end_time) > now) {
         sale.time_remaining_seconds = Math.floor(
-          (new Date(sale.end_time) - now) / 1000
+          (new Date(sale.end_time) - now) / 1000,
         );
       }
     }
@@ -309,7 +309,7 @@ exports.getActiveSeasonalSales = async (req, res) => {
          AND ss.end_time > $1
        GROUP BY ss.id
        ORDER BY ss.created_at DESC`,
-      [now]
+      [now],
     );
 
     if (seasonalSales.rows.length === 0) {
@@ -411,7 +411,7 @@ exports.getSeasonalSaleById = async (req, res) => {
        LEFT JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
        WHERE ss.id = $1
        GROUP BY ss.id`,
-      [saleId]
+      [saleId],
     );
 
     if (seasonalSale.rows.length === 0) {
@@ -426,7 +426,7 @@ exports.getSeasonalSaleById = async (req, res) => {
         ...sale,
         time_remaining_seconds: Math.max(
           0,
-          Math.floor((new Date(sale.end_time) - now) / 1000)
+          Math.floor((new Date(sale.end_time) - now) / 1000),
         ),
       },
     };
@@ -444,27 +444,30 @@ exports.getSeasonalSaleById = async (req, res) => {
 
 // Get products for a specific seasonal sale
 // Update getSeasonalSaleProducts function in seasonalSalesController.js
-
 exports.getSeasonalSaleProducts = async (req, res) => {
   try {
     const { saleId } = req.params;
-    const { page = 1, limit = 20, sort = "popularity" } = req.query;
+    const { page = 1, limit = 20, sort = "shuffle" } = req.query;
 
     if (!saleId || saleId === "undefined") {
       return res.status(400).json({ error: "Valid sale ID is required" });
     }
 
+    // ✅ Don't cache shuffled results
+    const isShuffled = sort === "shuffle" || sort === "random";
     const cacheKey = `seasonal_sale:${saleId}:products:${page}:${limit}:${sort}`;
-    const cached = await redis.get(cacheKey);
 
-    if (cached) {
-      return res.json(JSON.parse(cached));
+    if (!isShuffled) {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return res.json(JSON.parse(cached));
+      }
     }
 
     // Verify seasonal sale exists
     const saleCheck = await db.query(
       "SELECT id, name, season, start_time, end_time FROM seasonal_sales WHERE id = $1",
-      [saleId]
+      [saleId],
     );
 
     if (saleCheck.rows.length === 0) {
@@ -473,18 +476,23 @@ exports.getSeasonalSaleProducts = async (req, res) => {
 
     const seasonalSale = saleCheck.rows[0];
 
-    // Determine sort order
-    let orderBy = "ssp.sold_quantity DESC, p.name ASC";
-    if (sort === "price_asc") {
+    // ✅ Build ORDER BY — shuffle or named sort
+    let orderBy;
+    if (isShuffled) {
+      orderBy = "RANDOM()";
+    } else if (sort === "price_asc") {
       orderBy = "ssp.sale_price ASC";
     } else if (sort === "price_desc") {
       orderBy = "ssp.sale_price DESC";
     } else if (sort === "rating") {
       orderBy = "p.rating DESC";
     } else if (sort === "discount") {
-      orderBy = "(ssp.original_price - ssp.sale_price) DESC";
+      orderBy =
+        "((ssp.original_price - ssp.sale_price) / ssp.original_price) DESC";
     } else if (sort === "stock") {
       orderBy = "(ssp.max_quantity - ssp.sold_quantity) DESC";
+    } else {
+      orderBy = "RANDOM()"; // default to shuffle
     }
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -492,14 +500,13 @@ exports.getSeasonalSaleProducts = async (req, res) => {
     // Get total count
     const countResult = await db.query(
       `SELECT COUNT(*) as total FROM seasonal_sale_products WHERE seasonal_sale_id = $1`,
-      [saleId]
+      [saleId],
     );
-
     const total = parseInt(countResult.rows[0].total);
 
-    // ✅ Get products with ALL necessary fields including season
+    // ✅ Main query — matches your actual table columns
     const products = await db.query(
-      `SELECT 
+      `SELECT
         p.id,
         p.name,
         p.images,
@@ -515,8 +522,8 @@ exports.getSeasonalSaleProducts = async (req, res) => {
         ssp.max_quantity,
         ssp.sold_quantity,
         (ssp.max_quantity - ssp.sold_quantity) as remaining_quantity,
-        CASE 
-          WHEN ssp.max_quantity > 0 
+        CASE
+          WHEN ssp.max_quantity > 0
           THEN ROUND((ssp.sold_quantity::decimal / ssp.max_quantity) * 100)
           ELSE 0
         END as sold_percentage,
@@ -527,7 +534,7 @@ exports.getSeasonalSaleProducts = async (req, res) => {
        WHERE ssp.seasonal_sale_id = $1
        ORDER BY ${orderBy}
        LIMIT $2 OFFSET $3`,
-      [saleId, limit, offset]
+      [saleId, limit, offset],
     );
 
     const result = {
@@ -545,15 +552,130 @@ exports.getSeasonalSaleProducts = async (req, res) => {
         total,
         pages: Math.ceil(total / parseInt(limit)),
       },
+      shuffled: isShuffled,
+      shuffleTime: new Date().toISOString(),
     };
 
-    await redis.setex(cacheKey, 60, JSON.stringify(result));
+    // ✅ Only cache non-shuffled results
+    if (!isShuffled) {
+      await redis.setex(cacheKey, 60, JSON.stringify(result));
+    }
+
     res.json(result);
   } catch (error) {
     console.error("Get seasonal sale products error:", error);
     res.status(500).json({ error: "Failed to fetch products" });
   }
 };
+// exports.getSeasonalSaleProducts = async (req, res) => {
+//   try {
+//     const { saleId } = req.params;
+//     const { page = 1, limit = 20, sort = "popularity" } = req.query;
+
+//     if (!saleId || saleId === "undefined") {
+//       return res.status(400).json({ error: "Valid sale ID is required" });
+//     }
+
+//     const cacheKey = `seasonal_sale:${saleId}:products:${page}:${limit}:${sort}`;
+//     const cached = await redis.get(cacheKey);
+
+//     if (cached) {
+//       return res.json(JSON.parse(cached));
+//     }
+
+//     // Verify seasonal sale exists
+//     const saleCheck = await db.query(
+//       "SELECT id, name, season, start_time, end_time FROM seasonal_sales WHERE id = $1",
+//       [saleId]
+//     );
+
+//     if (saleCheck.rows.length === 0) {
+//       return res.status(404).json({ error: "Seasonal sale not found" });
+//     }
+
+//     const seasonalSale = saleCheck.rows[0];
+
+//     // Determine sort order
+//     let orderBy = "ssp.sold_quantity DESC, p.name ASC";
+//     if (sort === "price_asc") {
+//       orderBy = "ssp.sale_price ASC";
+//     } else if (sort === "price_desc") {
+//       orderBy = "ssp.sale_price DESC";
+//     } else if (sort === "rating") {
+//       orderBy = "p.rating DESC";
+//     } else if (sort === "discount") {
+//       orderBy = "(ssp.original_price - ssp.sale_price) DESC";
+//     } else if (sort === "stock") {
+//       orderBy = "(ssp.max_quantity - ssp.sold_quantity) DESC";
+//     }
+
+//     const offset = (parseInt(page) - 1) * parseInt(limit);
+
+//     // Get total count
+//     const countResult = await db.query(
+//       `SELECT COUNT(*) as total FROM seasonal_sale_products WHERE seasonal_sale_id = $1`,
+//       [saleId]
+//     );
+
+//     const total = parseInt(countResult.rows[0].total);
+
+//     // ✅ Get products with ALL necessary fields including season
+//     const products = await db.query(
+//       `SELECT
+//         p.id,
+//         p.name,
+//         p.images,
+//         p.rating,
+//         p.category,
+//         p.brand,
+//         p.total_reviews,
+//         ss.season,
+//         ss.name as sale_name,
+//         ss.banner_color,
+//         ssp.sale_price,
+//         ssp.original_price,
+//         ssp.max_quantity,
+//         ssp.sold_quantity,
+//         (ssp.max_quantity - ssp.sold_quantity) as remaining_quantity,
+//         CASE
+//           WHEN ssp.max_quantity > 0
+//           THEN ROUND((ssp.sold_quantity::decimal / ssp.max_quantity) * 100)
+//           ELSE 0
+//         END as sold_percentage,
+//         ROUND(((ssp.original_price - ssp.sale_price) / ssp.original_price) * 100) as discount_percentage
+//        FROM seasonal_sale_products ssp
+//        JOIN products p ON ssp.product_id = p.id
+//        JOIN seasonal_sales ss ON ssp.seasonal_sale_id = ss.id
+//        WHERE ssp.seasonal_sale_id = $1
+//        ORDER BY ${orderBy}
+//        LIMIT $2 OFFSET $3`,
+//       [saleId, limit, offset]
+//     );
+
+//     const result = {
+//       seasonalSale: {
+//         id: seasonalSale.id,
+//         name: seasonalSale.name,
+//         season: seasonalSale.season,
+//         start_time: seasonalSale.start_time,
+//         end_time: seasonalSale.end_time,
+//       },
+//       products: products.rows,
+//       pagination: {
+//         page: parseInt(page),
+//         limit: parseInt(limit),
+//         total,
+//         pages: Math.ceil(total / parseInt(limit)),
+//       },
+//     };
+
+//     await redis.setex(cacheKey, 60, JSON.stringify(result));
+//     res.json(result);
+//   } catch (error) {
+//     console.error("Get seasonal sale products error:", error);
+//     res.status(500).json({ error: "Failed to fetch products" });
+//   }
+// };
 
 // exports.getSeasonalSaleProducts = async (req, res) => {
 //   try {
@@ -713,7 +835,7 @@ exports.createSeasonalSale = async (req, res) => {
         endTime,
         discountPercentage,
         bannerColor || null,
-      ]
+      ],
     );
 
     const saleId = seasonalSale.rows[0].id;
@@ -726,7 +848,7 @@ exports.createSeasonalSale = async (req, res) => {
           // Get product details
           const product = await db.query(
             "SELECT id, price FROM products WHERE id = $1",
-            [productId]
+            [productId],
           );
 
           if (product.rows.length > 0) {
@@ -746,7 +868,7 @@ exports.createSeasonalSale = async (req, res) => {
                 product.rows[0].price,
                 salePrice,
                 100, // Default max quantity
-              ]
+              ],
             );
 
             addedProducts.push(addedProduct.rows[0]);
@@ -797,7 +919,7 @@ exports.updateSeasonalSaleStatus = async (req, res) => {
        SET status = $1, updated_at = NOW() 
        WHERE id = $2 
        RETURNING *`,
-      [status, saleId]
+      [status, saleId],
     );
 
     if (updated.rows.length === 0) {
@@ -835,7 +957,7 @@ exports.deleteSeasonalSale = async (req, res) => {
     // Verify sale exists
     const sale = await db.query(
       "SELECT id, status, start_time FROM seasonal_sales WHERE id = $1",
-      [saleId]
+      [saleId],
     );
 
     if (sale.rows.length === 0) {
@@ -852,7 +974,7 @@ exports.deleteSeasonalSale = async (req, res) => {
     // Delete associated products first
     await db.query(
       "DELETE FROM seasonal_sale_products WHERE seasonal_sale_id = $1",
-      [saleId]
+      [saleId],
     );
 
     // Delete the seasonal sale
