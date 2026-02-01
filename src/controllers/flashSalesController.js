@@ -5,120 +5,11 @@ const redis = require("../config/redis");
 const { v4: uuidv4 } = require("uuid");
 
 // Get active flash sales WITH products (for homepage)
-// exports.getActiveFlashSales = async (req, res) => {
-//   try {
-//     const cacheKey = "flash_sales:active";
-//     const cached = await redis.get(cacheKey);
-
-//     if (cached) {
-//       return res.json(JSON.parse(cached));
-//     }
-
-//     const now = new Date();
-
-//     // Get active flash sales
-//     const flashSales = await db.query(
-//       `SELECT
-//         id,
-//         title,
-//         description,
-//         start_time,
-//         end_time,
-//         discount_percentage,
-//         status,
-//         created_at
-//        FROM flash_sales
-//        WHERE status = 'active'
-//          AND start_time <= $1
-//          AND end_time > $1
-//        ORDER BY created_at DESC`,
-//       [now]
-//     );
-
-//     if (flashSales.rows.length === 0) {
-//       return res.json({ flashSales: [] });
-//     }
-
-//     // Get products for each flash sale with all necessary fields
-//     const flashSalesWithProducts = await Promise.all(
-//       flashSales.rows.map(async (sale) => {
-//         const products = await db.query(
-//           `SELECT
-//             p.id,
-//             p.name,
-//             p.images,
-//             p.rating,
-//             p.category,
-//             p.brand,
-//             fsp.id as flash_sale_product_id,
-//             fsp.sale_price,
-//             fsp.original_price,
-//             fsp.max_quantity,
-//             fsp.sold_quantity,
-//             (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
-//             CASE
-//               WHEN fsp.max_quantity > 0
-//               THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
-//               ELSE 0
-//             END as sold_percentage,
-//             ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage,
-//             pv.id as variant_id,
-//             pv.id as product_variant_id
-//            FROM flash_sale_products fsp
-//            JOIN products p ON fsp.product_id = p.id
-//            LEFT JOIN product_variants pv ON pv.product_id = p.id
-//            WHERE fsp.flash_sale_id = $1
-//              AND (fsp.max_quantity - fsp.sold_quantity) > 0
-//            ORDER BY fsp.sold_quantity DESC
-//            LIMIT 10`,
-//           [sale.id]
-//         );
-
-//         return {
-//           id: sale.id,
-//           title: sale.title,
-//           description: sale.description,
-//           start_time: sale.start_time,
-//           end_time: sale.end_time,
-//           discount_percentage: sale.discount_percentage,
-//           status: sale.status,
-//           products: products.rows,
-//           time_remaining_seconds: Math.max(
-//             0,
-//             Math.floor((new Date(sale.end_time) - now) / 1000)
-//           ),
-//         };
-//       })
-//     );
-
-//     const result = { flashSales: flashSalesWithProducts };
-
-//     // Cache for 1 minute
-//     await redis.setex(cacheKey, 60, JSON.stringify(result));
-
-//     res.json(result);
-//   } catch (error) {
-//     console.error("Get active flash sales error:", error);
-//     res.status(500).json({
-//       error: "Failed to fetch flash sales",
-//       details: error.message,
-//     });
-//   }
-// };
-
-// 2. Update getActiveFlashSales function
 exports.getActiveFlashSales = async (req, res) => {
   try {
-    const cacheKey = "flash_sales:active";
-    const cached = await redis.get(cacheKey);
-
-    if (cached) {
-      return res.json(JSON.parse(cached));
-    }
-
+    // ✅ Don't cache — shuffle means every request must be fresh
     const now = new Date();
 
-    // Get active flash sales
     const flashSales = await db.query(
       `SELECT 
         id,
@@ -141,7 +32,7 @@ exports.getActiveFlashSales = async (req, res) => {
       return res.json({ flashSales: [] });
     }
 
-    // ✅ Get products for each flash sale with all necessary fields
+    // ✅ Products shuffled via RANDOM() on every call
     const flashSalesWithProducts = await Promise.all(
       flashSales.rows.map(async (sale) => {
         const products = await db.query(
@@ -169,7 +60,7 @@ exports.getActiveFlashSales = async (req, res) => {
            JOIN products p ON fsp.product_id = p.id
            WHERE fsp.flash_sale_id = $1
              AND (fsp.max_quantity - fsp.sold_quantity) > 0
-           ORDER BY fsp.sold_quantity DESC
+           ORDER BY RANDOM()
            LIMIT 10`,
           [sale.id],
         );
@@ -187,15 +78,15 @@ exports.getActiveFlashSales = async (req, res) => {
             0,
             Math.floor((new Date(sale.end_time) - now) / 1000),
           ),
+          shuffled: true,
+          shuffleTime: new Date().toISOString(),
         };
       }),
     );
 
     const result = { flashSales: flashSalesWithProducts };
 
-    // Cache for 1 minute
-    await redis.setex(cacheKey, 60, JSON.stringify(result));
-
+    // ✅ No caching — RANDOM() must run fresh each time
     res.json(result);
   } catch (error) {
     console.error("Get active flash sales error:", error);
@@ -300,89 +191,6 @@ exports.getUpcomingFlashSales = async (req, res) => {
 };
 
 // Get specific flash sale by ID with products
-// exports.getFlashSaleById = async (req, res) => {
-//   try {
-//     const { flashSaleId } = req.params;
-
-//     if (!flashSaleId || flashSaleId === "undefined") {
-//       return res.status(400).json({ error: "Valid flash sale ID is required" });
-//     }
-
-//     const cacheKey = `flash_sale:${flashSaleId}`;
-//     const cached = await redis.get(cacheKey);
-
-//     if (cached) {
-//       return res.json(JSON.parse(cached));
-//     }
-
-//     // Get flash sale
-//     const flashSale = await db.query(
-//       `SELECT * FROM flash_sales WHERE id = $1`,
-//       [flashSaleId]
-//     );
-
-//     if (flashSale.rows.length === 0) {
-//       return res.status(404).json({ error: "Flash sale not found" });
-//     }
-
-//     const sale = flashSale.rows[0];
-
-//     // Get products with all fields
-//     const products = await db.query(
-//       `SELECT
-//         p.id,
-//         p.name,
-//         p.description,
-//         p.images,
-//         p.rating,
-//         p.category,
-//         p.brand,
-//         fsp.id as flash_sale_product_id,
-//         fsp.sale_price,
-//         fsp.original_price,
-//         fsp.max_quantity,
-//         fsp.sold_quantity,
-//         (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
-//         CASE
-//           WHEN fsp.max_quantity > 0
-//           THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
-//           ELSE 0
-//         END as sold_percentage,
-//         ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage,
-//         pv.id as variant_id,
-//         pv.id as product_variant_id,
-//         pv.stock_quantity
-//        FROM flash_sale_products fsp
-//        JOIN products p ON fsp.product_id = p.id
-//        LEFT JOIN product_variants pv ON pv.product_id = p.id
-//        WHERE fsp.flash_sale_id = $1
-//        ORDER BY fsp.sold_quantity DESC`,
-//       [flashSaleId]
-//     );
-
-//     const now = new Date();
-//     const result = {
-//       flashSale: {
-//         ...sale,
-//         products: products.rows,
-//         time_remaining_seconds: Math.max(
-//           0,
-//           Math.floor((new Date(sale.end_time) - now) / 1000)
-//         ),
-//       },
-//     };
-
-//     await redis.setex(cacheKey, 60, JSON.stringify(result));
-//     res.json(result);
-//   } catch (error) {
-//     console.error("Get flash sale error:", error);
-//     res.status(500).json({
-//       error: "Failed to fetch flash sale",
-//       details: error.message,
-//     });
-//   }
-// };
-
 exports.getFlashSaleById = async (req, res) => {
   try {
     const { flashSaleId } = req.params;
@@ -640,239 +448,6 @@ exports.getFlashSaleProducts = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch products" });
   }
 };
-
-// exports.getFlashSaleProducts = async (req, res) => {
-//   try {
-//     const { flashSaleId } = req.params;
-//     const { page = 1, limit = 20, sort = "popularity" } = req.query;
-
-//     if (!flashSaleId || flashSaleId === "undefined") {
-//       return res.status(400).json({ error: "Valid flash sale ID is required" });
-//     }
-
-//     const cacheKey = `flash_sale:${flashSaleId}:products:${page}:${limit}:${sort}`;
-//     const cached = await redis.get(cacheKey);
-
-//     if (cached) {
-//       return res.json(JSON.parse(cached));
-//     }
-
-//     // Verify flash sale exists
-//     const saleCheck = await db.query(
-//       "SELECT id, title, status, start_time, end_time FROM flash_sales WHERE id = $1",
-//       [flashSaleId]
-//     );
-
-//     if (saleCheck.rows.length === 0) {
-//       return res.status(404).json({ error: "Flash sale not found" });
-//     }
-
-//     const flashSale = saleCheck.rows[0];
-
-//     const offset = (parseInt(page) - 1) * parseInt(limit);
-
-//     // Get total count
-//     const countResult = await db.query(
-//       `SELECT COUNT(*) as total FROM flash_sale_products WHERE flash_sale_id = $1`,
-//       [flashSaleId]
-//     );
-
-//     const total = parseInt(countResult.rows[0].total);
-
-//     // Build the query based on sort parameter
-//     let query = `
-//       SELECT
-//         p.id,
-//         p.id as product_id,
-//         p.name,
-//         p.images,
-//         p.rating,
-//         p.category,
-//         p.brand,
-//         p.stock_quantity,
-//         fsp.id as flash_sale_product_id,
-//         fsp.sale_price,
-//         fsp.original_price,
-//         fsp.max_quantity,
-//         fsp.sold_quantity,
-//         (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
-//         CASE
-//           WHEN fsp.max_quantity > 0
-//           THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
-//           ELSE 0
-//         END as sold_percentage,
-//         ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage
-//        FROM flash_sale_products fsp
-//        JOIN products p ON fsp.product_id = p.id
-//        WHERE fsp.flash_sale_id = $1
-//     `;
-
-//     // Add ORDER BY clause based on sort parameter
-//     if (sort === "price_asc") {
-//       query += " ORDER BY fsp.sale_price ASC, p.name ASC";
-//     } else if (sort === "price_desc") {
-//       query += " ORDER BY fsp.sale_price DESC, p.name ASC";
-//     } else if (sort === "discount") {
-//       query +=
-//         " ORDER BY (fsp.original_price - fsp.sale_price) DESC, p.name ASC";
-//     } else if (sort === "stock") {
-//       query +=
-//         " ORDER BY (fsp.max_quantity - fsp.sold_quantity) DESC, p.name ASC";
-//     } else if (sort === "rating") {
-//       query += " ORDER BY p.rating DESC, p.name ASC";
-//     } else {
-//       // Default: popularity (sold quantity)
-//       query += " ORDER BY fsp.sold_quantity DESC, p.name ASC";
-//     }
-
-//     query += " LIMIT $2 OFFSET $3";
-
-//     const products = await db.query(query, [flashSaleId, limit, offset]);
-
-//     const result = {
-//       flashSale: {
-//         id: flashSale.id,
-//         title: flashSale.title,
-//         status: flashSale.status,
-//         start_time: flashSale.start_time,
-//         end_time: flashSale.end_time,
-//       },
-//       products: products.rows,
-//       pagination: {
-//         page: parseInt(page),
-//         limit: parseInt(limit),
-//         total,
-//         pages: Math.ceil(total / parseInt(limit)),
-//       },
-//     };
-
-//     await redis.setex(cacheKey, 60, JSON.stringify(result));
-//     res.json(result);
-//   } catch (error) {
-//     console.error("Get flash sale products error:", error);
-//     res.status(500).json({ error: "Failed to fetch products" });
-//   }
-// };
-
-// Legacy support
-
-// Update these two functions in flashSalesController.js
-
-// 1. Update getFlashSaleProducts function
-// exports.getFlashSaleProducts = async (req, res) => {
-//   try {
-//     const { flashSaleId } = req.params;
-//     const { page = 1, limit = 20, sort = "popularity" } = req.query;
-
-//     if (!flashSaleId || flashSaleId === "undefined") {
-//       return res.status(400).json({ error: "Valid flash sale ID is required" });
-//     }
-
-//     const cacheKey = `flash_sale:${flashSaleId}:products:${page}:${limit}:${sort}`;
-//     const cached = await redis.get(cacheKey);
-
-//     if (cached) {
-//       return res.json(JSON.parse(cached));
-//     }
-
-//     // Verify flash sale exists
-//     const saleCheck = await db.query(
-//       "SELECT id, title, status, start_time, end_time FROM flash_sales WHERE id = $1",
-//       [flashSaleId]
-//     );
-
-//     if (saleCheck.rows.length === 0) {
-//       return res.status(404).json({ error: "Flash sale not found" });
-//     }
-
-//     const flashSale = saleCheck.rows[0];
-
-//     const offset = (parseInt(page) - 1) * parseInt(limit);
-
-//     // Get total count
-//     const countResult = await db.query(
-//       `SELECT COUNT(*) as total FROM flash_sale_products WHERE flash_sale_id = $1`,
-//       [flashSaleId]
-//     );
-
-//     const total = parseInt(countResult.rows[0].total);
-
-//     // ✅ Build the query with ALL necessary fields
-//     let query = `
-//       SELECT
-//         p.id,
-//         p.id as product_id,
-//         p.name,
-//         p.images,
-//         p.rating,
-//         p.category,
-//         p.brand,
-//         p.stock_quantity,
-//         p.total_reviews,
-//         p.discount_percentage as product_discount,
-//         fsp.id as flash_sale_product_id,
-//         fsp.sale_price,
-//         fsp.original_price,
-//         fsp.max_quantity,
-//         fsp.sold_quantity,
-//         (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
-//         CASE
-//           WHEN fsp.max_quantity > 0
-//           THEN ROUND((fsp.sold_quantity::decimal / fsp.max_quantity) * 100)
-//           ELSE 0
-//         END as sold_percentage,
-//         ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage
-//        FROM flash_sale_products fsp
-//        JOIN products p ON fsp.product_id = p.id
-//        WHERE fsp.flash_sale_id = $1
-//     `;
-
-//     // Add ORDER BY clause based on sort parameter
-//     if (sort === "price_asc") {
-//       query += " ORDER BY fsp.sale_price ASC, p.name ASC";
-//     } else if (sort === "price_desc") {
-//       query += " ORDER BY fsp.sale_price DESC, p.name ASC";
-//     } else if (sort === "discount") {
-//       query +=
-//         " ORDER BY (fsp.original_price - fsp.sale_price) DESC, p.name ASC";
-//     } else if (sort === "stock") {
-//       query +=
-//         " ORDER BY (fsp.max_quantity - fsp.sold_quantity) DESC, p.name ASC";
-//     } else if (sort === "rating") {
-//       query += " ORDER BY p.rating DESC, p.name ASC";
-//     } else {
-//       // Default: popularity (sold quantity)
-//       query += " ORDER BY fsp.sold_quantity DESC, p.name ASC";
-//     }
-
-//     query += " LIMIT $2 OFFSET $3";
-
-//     const products = await db.query(query, [flashSaleId, limit, offset]);
-
-//     const result = {
-//       flashSale: {
-//         id: flashSale.id,
-//         title: flashSale.title,
-//         status: flashSale.status,
-//         start_time: flashSale.start_time,
-//         end_time: flashSale.end_time,
-//       },
-//       products: products.rows,
-//       pagination: {
-//         page: parseInt(page),
-//         limit: parseInt(limit),
-//         total,
-//         pages: Math.ceil(total / parseInt(limit)),
-//       },
-//     };
-
-//     await redis.setex(cacheKey, 60, JSON.stringify(result));
-//     res.json(result);
-//   } catch (error) {
-//     console.error("Get flash sale products error:", error);
-//     res.status(500).json({ error: "Failed to fetch products" });
-//   }
-// };
 
 exports.getFlashSaleDetails = async (req, res) => {
   return exports.getFlashSaleById(req, res);
