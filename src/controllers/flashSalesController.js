@@ -276,56 +276,42 @@ exports.getAllFlashSalesByProductId = async (req, res) => {
     const { productId } = req.params;
 
     if (!productId || productId === "undefined") {
-      console.log("❌ Invalid product ID provided");
       return res.json([]);
     }
 
     const now = new Date();
 
-    console.log(`🔍 Fetching ALL flash sales for product: ${productId}`);
-
     const flashSales = await db.query(
-      `SELECT DISTINCT
+      `SELECT
         fs.id,
         fs.title,
-        fs.title as name,
         fs.description,
         fs.start_time,
         fs.end_time,
         fs.status,
-        fs.discount_percentage,
         fsp.sale_price,
         fsp.original_price,
         fsp.max_quantity,
         fsp.sold_quantity,
         (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
-        ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as product_discount_percentage
+        ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage,
+        CASE
+          WHEN fs.start_time <= $2 AND fs.end_time > $2 THEN 1
+          WHEN fs.start_time > $2 THEN 2
+          ELSE 3
+        END as sale_sort_order
        FROM flash_sales fs
        JOIN flash_sale_products fsp ON fs.id = fsp.flash_sale_id
        WHERE fsp.product_id = $1
          AND fs.end_time > $2
-       ORDER BY 
-         CASE 
-           WHEN fs.start_time <= $2 AND fs.end_time > $2 THEN 1
-           WHEN fs.start_time > $2 THEN 2
-           ELSE 3
-         END,
-         fs.start_time ASC`,
+         AND fs.status IN ('active', 'scheduled')
+       ORDER BY sale_sort_order ASC, fs.start_time ASC`,
       [productId, now],
     );
 
-    console.log(
-      `✅ Found ${flashSales.rows.length} flash sales for product ${productId}`,
-    );
-
-    // CRITICAL: Always return an array, never a single object
-    const salesArray = flashSales.rows || [];
-
-    console.log(`📤 Returning array with ${salesArray.length} flash sales`);
-
-    res.json(salesArray);
+    res.json(flashSales.rows);
   } catch (error) {
-    console.error("❌ Get all flash sales by product error:", error);
+    console.error("Get all flash sales by product error:", error);
     res.json([]);
   }
 };
