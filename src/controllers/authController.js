@@ -8,13 +8,13 @@ const { OAuth2Client } = require("google-auth-library");
 
 const googleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET
+  process.env.GOOGLE_CLIENT_SECRET,
 );
 
 // Helper: Generate tokens
 function generateTokens(userId) {
   const accessToken = jwt.sign({ userId }, process.env.JWT_SECRET, {
-    expiresIn: "60m",
+    expiresIn: "7d",
   });
 
   const refreshToken = jwt.sign({ userId }, process.env.JWT_REFRESH_SECRET, {
@@ -45,7 +45,7 @@ exports.register = async (req, res) => {
     // Check if user exists
     const existing = await db.query(
       "SELECT id FROM users WHERE phone_number = $1",
-      [phoneNumber]
+      [phoneNumber],
     );
 
     if (existing.rows.length > 0) {
@@ -61,7 +61,7 @@ exports.register = async (req, res) => {
       `INSERT INTO users (id, phone_number, password_hash, full_name, signup_method, is_verified, created_at, updated_at)
              VALUES ($1, $2, $3, $4, 'phone', TRUE, NOW(), NOW())
              RETURNING id, phone_number, full_name`,
-      [userId, phoneNumber, password_hash, full_name]
+      [userId, phoneNumber, password_hash, full_name],
     );
 
     const { accessToken, refreshToken } = generateTokens(user.rows[0].id);
@@ -71,7 +71,7 @@ exports.register = async (req, res) => {
       `refresh_token:${user.rows[0].id}`,
       refreshToken,
       "EX",
-      604800
+      604800,
     );
 
     res.status(201).json({
@@ -117,7 +117,7 @@ exports.login = async (req, res) => {
 
     const passwordMatch = await bcrypt.compare(
       password,
-      userData.password_hash
+      userData.password_hash,
     );
 
     if (!passwordMatch) {
@@ -169,7 +169,7 @@ exports.googleVerify = async (req, res) => {
 
     let oauthAccount = await db.query(
       "SELECT * FROM oauth_accounts WHERE provider = $1 AND provider_user_id = $2",
-      ["google", googleId]
+      ["google", googleId],
     );
 
     let user;
@@ -191,7 +191,7 @@ exports.googleVerify = async (req, res) => {
         `INSERT INTO users (id, phone_number, email, full_name, profile_image, signup_method, is_verified, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, 'google', TRUE, NOW(), NOW())
          RETURNING id, phone_number, email, full_name, profile_image`,
-        [userId, null, email, name, picture] // phone_number = null for Google users
+        [userId, null, email, name, picture], // phone_number = null for Google users
       );
 
       await db.query(
@@ -204,7 +204,7 @@ exports.googleVerify = async (req, res) => {
           googleId,
           email,
           JSON.stringify(googleProfile),
-        ]
+        ],
       );
 
       user = createdUser;
@@ -217,7 +217,7 @@ exports.googleVerify = async (req, res) => {
       `refresh_token:${user.rows[0].id}`,
       refreshToken,
       "EX",
-      604800
+      604800,
     );
 
     console.log("Google auth successful for user:", user.rows[0].id);
@@ -265,7 +265,7 @@ exports.refreshToken = async (req, res) => {
     const accessToken = jwt.sign(
       { userId: decoded.userId },
       process.env.JWT_SECRET,
-      { expiresIn: "15m" }
+      { expiresIn: "15m" },
     );
 
     res.json({ accessToken });
