@@ -1,8 +1,7 @@
-// controllers/cartController.js
+// controllers/cartController.js - FINAL VERSION FOR YOUR SCHEMA
 const pool = require("../config/database");
 
-// Determine which table to use
-const CART_TABLE = "carts"; // Your existing table uses 'carts'
+const CART_TABLE = "carts";
 
 const cartController = {
   // Get user's cart
@@ -25,12 +24,17 @@ const cartController = {
           p.discount_percentage,
           p.stock_quantity,
           p.sold_count,
+          p.images,  -- ✅ Get the JSONB images array from products table
+          p.category,
+          p.brand,
+          p.rating,
+          p.total_reviews,
           pv.color,
           pv.size,
+          pv.sku,
           pv.base_price as variant_price,
           pv.discount_percentage as variant_discount,
           pv.stock_quantity as variant_stock,
-          (SELECT image_url FROM product_images WHERE product_id = p.id ORDER BY display_order LIMIT 1) as image_url,
           CASE 
             WHEN pv.id IS NOT NULL THEN pv.stock_quantity
             ELSE p.stock_quantity
@@ -60,9 +64,56 @@ const cartController = {
 
       const { rows } = await pool.query(cartQuery, [userId]);
 
+      // ✅ Map variant colors to product images (same logic as productController.getProductDetails)
+      const processedRows = rows.map((item) => {
+        let imageUrl = null;
+        let variantImageUrl = null;
+
+        // If the item has a variant with a color and product has images array
+        if (
+          item.color &&
+          item.images &&
+          Array.isArray(item.images) &&
+          item.images.length > 0
+        ) {
+          // Get all cart items for this specific product to determine unique colors
+          const productItems = rows.filter(
+            (r) => r.product_id === item.product_id,
+          );
+          const uniqueColors = [
+            ...new Set(productItems.map((r) => r.color).filter(Boolean)),
+          ];
+
+          // Find the index of this variant's color in the unique colors array
+          const colorIndex = uniqueColors.indexOf(item.color);
+
+          // Map color index to image index (with wraparound)
+          if (colorIndex !== -1) {
+            variantImageUrl = item.images[colorIndex % item.images.length];
+            imageUrl = variantImageUrl;
+          } else {
+            // Fallback to first image if color not found
+            imageUrl = item.images[0];
+          }
+        } else if (
+          item.images &&
+          Array.isArray(item.images) &&
+          item.images.length > 0
+        ) {
+          // No color variant, use first image
+          imageUrl = item.images[0];
+        }
+
+        return {
+          ...item,
+          image_url: imageUrl,
+          variant_image_url: variantImageUrl,
+        };
+      });
+
       // Check for active sales on cart items
       const itemsWithSales = await Promise.all(
-        rows.map(async (item) => {
+        processedRows.map(async (item) => {
           // Check for flash sale
           const flashSaleQuery = `
             SELECT fs.*, fsp.sale_price
@@ -71,6 +122,7 @@ const cartController = {
             WHERE fsp.product_id = $1
             AND fs.start_time <= NOW()
             AND fs.end_time > NOW()
+            AND fs.status = 'active'
             ORDER BY fsp.sale_price ASC
             LIMIT 1
           `;
@@ -86,6 +138,7 @@ const cartController = {
             WHERE ssp.product_id = $1
             AND ss.start_time <= NOW()
             AND ss.end_time > NOW()
+            AND ss.is_active = true
             ORDER BY ssp.sale_price ASC
             LIMIT 1
           `;
@@ -101,7 +154,7 @@ const cartController = {
             const saleDiscount = Math.round(
               ((item.item_original_price - salePrice) /
                 item.item_original_price) *
-                100
+                100,
             );
 
             return {
@@ -115,7 +168,7 @@ const cartController = {
           }
 
           return item;
-        })
+        }),
       );
 
       res.json({ items: itemsWithSales });
