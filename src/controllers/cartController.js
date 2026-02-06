@@ -1,4 +1,4 @@
-// controllers/cartController.js - WITH SELECTED IMAGE SUPPORT
+// controllers/cartController.js - FIXED VERSION
 const pool = require("../config/database");
 
 const CART_TABLE = "carts";
@@ -18,7 +18,7 @@ const cartController = {
           c.quantity,
           c.is_selected,
           c.created_at,
-          c.selected_image_url,  -- ✅ NEW: Get user's selected image
+          c.selected_image_url,  -- ✅ User's manually selected image
           p.name,
           p.price,
           p.original_price,
@@ -65,17 +65,22 @@ const cartController = {
 
       const { rows } = await pool.query(cartQuery, [userId]);
 
-      // ✅ Map images with priority: selected_image_url > color mapping > first image
+      // ✅ FIXED: Strict priority - NEVER overwrite selected_image_url
       const processedRows = rows.map((item) => {
         let imageUrl = null;
         let variantImageUrl = null;
 
-        // ✅ PRIORITY 1: Use user's selected image if available
+        // ✅ PRIORITY 1: If user selected an image, USE IT (don't override!)
         if (item.selected_image_url) {
           imageUrl = item.selected_image_url;
           variantImageUrl = item.selected_image_url;
+
+          console.log(
+            `✅ Using selected image for cart item ${item.id}:`,
+            item.selected_image_url,
+          );
         }
-        // PRIORITY 2: Map variant color to image array
+        // PRIORITY 2: If no selected image, map variant color to image array
         else if (
           item.color &&
           item.images &&
@@ -93,8 +98,16 @@ const cartController = {
           if (colorIndex !== -1) {
             variantImageUrl = item.images[colorIndex % item.images.length];
             imageUrl = variantImageUrl;
+            console.log(
+              `🎨 Using color-mapped image for cart item ${item.id}:`,
+              imageUrl,
+            );
           } else {
             imageUrl = item.images[0];
+            console.log(
+              `📦 Using first image for cart item ${item.id}:`,
+              imageUrl,
+            );
           }
         }
         // PRIORITY 3: Use first product image
@@ -104,12 +117,19 @@ const cartController = {
           item.images.length > 0
         ) {
           imageUrl = item.images[0];
+          console.log(
+            `📷 Using fallback image for cart item ${item.id}:`,
+            imageUrl,
+          );
         }
 
+        // ✅ CRITICAL: Return the item with image_url and variant_image_url
+        // but DON'T include selected_image_url in the response to avoid confusion
         return {
           ...item,
-          image_url: imageUrl,
+          image_url: imageUrl, // Final image to display
           variant_image_url: variantImageUrl,
+          // selected_image_url is already in the item from database
         };
       });
 
@@ -180,7 +200,7 @@ const cartController = {
     }
   },
 
-  // Add item to cart - ✅ UPDATED to accept selected_image_url
+  // Add item to cart - ✅ WITH LOGGING
   addToCart: async (req, res) => {
     try {
       const userId = req.user.id;
@@ -188,8 +208,15 @@ const cartController = {
         product_id,
         product_variant_id,
         quantity = 1,
-        selected_image_url, // ✅ NEW: Accept selected image from frontend
+        selected_image_url,
       } = req.body;
+
+      console.log("📥 Add to cart request:", {
+        product_id,
+        product_variant_id,
+        quantity,
+        selected_image_url,
+      });
 
       // Check if item already exists in cart
       const existingQuery = `
@@ -205,7 +232,7 @@ const cartController = {
       ]);
 
       if (existing.rows.length > 0) {
-        // Update quantity and optionally update selected image
+        // Update quantity and ALWAYS update selected image if provided
         const updateQuery = selected_image_url
           ? `
             UPDATE ${CART_TABLE}
@@ -227,6 +254,12 @@ const cartController = {
           : [quantity, existing.rows[0].id, userId];
 
         const result = await pool.query(updateQuery, params);
+
+        console.log(
+          "✅ Cart updated with selected image:",
+          result.rows[0].selected_image_url,
+        );
+
         res.json({ message: "Cart updated", item: result.rows[0] });
       } else {
         // Insert new item with selected image
@@ -255,6 +288,12 @@ const cartController = {
           : [userId, product_id, product_variant_id || null, quantity];
 
         const result = await pool.query(insertQuery, params);
+
+        console.log(
+          "✅ New cart item created with selected image:",
+          result.rows[0].selected_image_url,
+        );
+
         res.json({ message: "Item added to cart", item: result.rows[0] });
       }
     } catch (error) {
