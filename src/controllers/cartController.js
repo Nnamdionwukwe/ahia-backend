@@ -1,4 +1,4 @@
-// controllers/cartController.js - FINAL VERSION FOR YOUR SCHEMA
+// controllers/cartController.js - WITH SELECTED IMAGE SUPPORT
 const pool = require("../config/database");
 
 const CART_TABLE = "carts";
@@ -18,13 +18,14 @@ const cartController = {
           c.quantity,
           c.is_selected,
           c.created_at,
+          c.selected_image_url,  -- ✅ NEW: Get user's selected image
           p.name,
           p.price,
           p.original_price,
           p.discount_percentage,
           p.stock_quantity,
           p.sold_count,
-          p.images,  -- ✅ Get the JSONB images array from products table
+          p.images,
           p.category,
           p.brand,
           p.rating,
@@ -64,43 +65,44 @@ const cartController = {
 
       const { rows } = await pool.query(cartQuery, [userId]);
 
-      // ✅ Map variant colors to product images (same logic as productController.getProductDetails)
+      // ✅ Map images with priority: selected_image_url > color mapping > first image
       const processedRows = rows.map((item) => {
         let imageUrl = null;
         let variantImageUrl = null;
 
-        // If the item has a variant with a color and product has images array
-        if (
+        // ✅ PRIORITY 1: Use user's selected image if available
+        if (item.selected_image_url) {
+          imageUrl = item.selected_image_url;
+          variantImageUrl = item.selected_image_url;
+        }
+        // PRIORITY 2: Map variant color to image array
+        else if (
           item.color &&
           item.images &&
           Array.isArray(item.images) &&
           item.images.length > 0
         ) {
-          // Get all cart items for this specific product to determine unique colors
           const productItems = rows.filter(
             (r) => r.product_id === item.product_id,
           );
           const uniqueColors = [
             ...new Set(productItems.map((r) => r.color).filter(Boolean)),
           ];
-
-          // Find the index of this variant's color in the unique colors array
           const colorIndex = uniqueColors.indexOf(item.color);
 
-          // Map color index to image index (with wraparound)
           if (colorIndex !== -1) {
             variantImageUrl = item.images[colorIndex % item.images.length];
             imageUrl = variantImageUrl;
           } else {
-            // Fallback to first image if color not found
             imageUrl = item.images[0];
           }
-        } else if (
+        }
+        // PRIORITY 3: Use first product image
+        else if (
           item.images &&
           Array.isArray(item.images) &&
           item.images.length > 0
         ) {
-          // No color variant, use first image
           imageUrl = item.images[0];
         }
 
@@ -178,11 +180,16 @@ const cartController = {
     }
   },
 
-  // Add item to cart
+  // Add item to cart - ✅ UPDATED to accept selected_image_url
   addToCart: async (req, res) => {
     try {
       const userId = req.user.id;
-      const { product_id, product_variant_id, quantity = 1 } = req.body;
+      const {
+        product_id,
+        product_variant_id,
+        quantity = 1,
+        selected_image_url, // ✅ NEW: Accept selected image from frontend
+      } = req.body;
 
       // Check if item already exists in cart
       const existingQuery = `
@@ -198,31 +205,56 @@ const cartController = {
       ]);
 
       if (existing.rows.length > 0) {
-        // Update quantity
-        const updateQuery = `
-          UPDATE ${CART_TABLE}
-          SET quantity = quantity + $1, updated_at = NOW()
-          WHERE id = $2
-          RETURNING *
-        `;
-        const result = await pool.query(updateQuery, [
-          quantity,
-          existing.rows[0].id,
-        ]);
+        // Update quantity and optionally update selected image
+        const updateQuery = selected_image_url
+          ? `
+            UPDATE ${CART_TABLE}
+            SET quantity = quantity + $1, 
+                selected_image_url = $4,
+                updated_at = NOW()
+            WHERE id = $2 AND user_id = $3
+            RETURNING *
+          `
+          : `
+            UPDATE ${CART_TABLE}
+            SET quantity = quantity + $1, updated_at = NOW()
+            WHERE id = $2 AND user_id = $3
+            RETURNING *
+          `;
+
+        const params = selected_image_url
+          ? [quantity, existing.rows[0].id, userId, selected_image_url]
+          : [quantity, existing.rows[0].id, userId];
+
+        const result = await pool.query(updateQuery, params);
         res.json({ message: "Cart updated", item: result.rows[0] });
       } else {
-        // Insert new item
-        const insertQuery = `
-          INSERT INTO ${CART_TABLE} (user_id, product_id, product_variant_id, quantity, is_selected)
-          VALUES ($1, $2, $3, $4, true)
-          RETURNING *
-        `;
-        const result = await pool.query(insertQuery, [
-          userId,
-          product_id,
-          product_variant_id || null,
-          quantity,
-        ]);
+        // Insert new item with selected image
+        const insertQuery = selected_image_url
+          ? `
+            INSERT INTO ${CART_TABLE} 
+            (user_id, product_id, product_variant_id, quantity, is_selected, selected_image_url)
+            VALUES ($1, $2, $3, $4, true, $5)
+            RETURNING *
+          `
+          : `
+            INSERT INTO ${CART_TABLE} 
+            (user_id, product_id, product_variant_id, quantity, is_selected)
+            VALUES ($1, $2, $3, $4, true)
+            RETURNING *
+          `;
+
+        const params = selected_image_url
+          ? [
+              userId,
+              product_id,
+              product_variant_id || null,
+              quantity,
+              selected_image_url,
+            ]
+          : [userId, product_id, product_variant_id || null, quantity];
+
+        const result = await pool.query(insertQuery, params);
         res.json({ message: "Item added to cart", item: result.rows[0] });
       }
     } catch (error) {
@@ -239,7 +271,6 @@ const cartController = {
       const { quantity } = req.body;
 
       if (quantity <= 0) {
-        // Delete item if quantity is 0
         const deleteQuery = `DELETE FROM ${CART_TABLE} WHERE id = $1 AND user_id = $2`;
         await pool.query(deleteQuery, [id, userId]);
         res.json({ message: "Item removed from cart" });
