@@ -2,7 +2,7 @@ const db = require("../src/config/database");
 
 /**
  * Database Setup Script for Paystack Integration
- * FIXED: Uses UUID for user_id and order_id to match your schema
+ * Handles foreign key constraints properly
  */
 
 async function createPaystackTables() {
@@ -13,7 +13,7 @@ async function createPaystackTables() {
 
     await client.query("BEGIN");
 
-    // Check if users table exists and get id column type
+    // First, check if users table exists and has id column
     console.log("🔍 Checking users table...");
     const usersTable = await client.query(`
       SELECT column_name, data_type 
@@ -23,6 +23,8 @@ async function createPaystackTables() {
 
     if (usersTable.rows.length === 0) {
       console.log("⚠️  Warning: users table or id column not found");
+      console.log("   Creating transactions table WITHOUT user_id foreign key");
+      console.log("   You can add the foreign key later if needed\n");
     } else {
       console.log(
         `✅ Found users.id column (${usersTable.rows[0].data_type})\n`,
@@ -46,15 +48,15 @@ async function createPaystackTables() {
       console.log("⚠️  Warning: orders table not found\n");
     }
 
-    // ✅ FIXED: Create transactions table with UUID types
+    // Create transactions table with conditional foreign keys
     console.log("📋 Creating transactions table...");
 
     let createTableSQL = `
       CREATE TABLE IF NOT EXISTS transactions (
         id SERIAL PRIMARY KEY,
         reference VARCHAR(100) UNIQUE NOT NULL,
-        user_id UUID,  -- ✅ CHANGED FROM INTEGER TO UUID
-        order_id UUID,  -- ✅ CHANGED FROM INTEGER TO UUID
+        user_id INTEGER,
+        order_id INTEGER,
         email VARCHAR(255) NOT NULL,
         amount DECIMAL(10, 2) NOT NULL,
         status VARCHAR(50) DEFAULT 'pending',
@@ -90,7 +92,7 @@ async function createPaystackTables() {
     await client.query(createTableSQL);
     console.log("✅ Transactions table created successfully");
 
-    // Create indexes
+    // Create indexes for transactions
     console.log("📋 Creating indexes for transactions table...");
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_transactions_reference ON transactions(reference)
@@ -171,7 +173,7 @@ async function createPaystackTables() {
 
     console.log("\n🎉 Paystack database setup completed successfully!\n");
     console.log("Tables created:");
-    console.log("  ✓ transactions (with UUID foreign keys)");
+    console.log("  ✓ transactions");
     console.log("  ✓ webhook_logs\n");
 
     // Verify tables
@@ -235,7 +237,9 @@ async function createPaystackTables() {
         );
       });
     } else {
-      console.log("  ⚠️  No foreign key constraints");
+      console.log(
+        "  ⚠️  No foreign key constraints (tables may not exist yet)",
+      );
     }
 
     console.log("\n✨ You can now start processing payments!\n");
@@ -243,6 +247,16 @@ async function createPaystackTables() {
     await client.query("ROLLBACK");
     console.error("\n❌ Error creating Paystack tables:", error.message);
     console.error("Stack:", error.stack);
+
+    // Provide helpful error messages
+    if (error.message.includes("foreign key constraint")) {
+      console.error("\n💡 Tip: The users or orders table may not exist yet.");
+      console.error(
+        "   The script will create transactions table without foreign keys.",
+      );
+      console.error("   You can add them later when those tables exist.");
+    }
+
     process.exit(1);
   } finally {
     client.release();
