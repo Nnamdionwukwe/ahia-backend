@@ -1,11 +1,12 @@
+// src/routes/payments.js
 const express = require("express");
 const router = express.Router();
-const paystackController = require("../controllers/PaystackController");
-const { authenticateToken, optionalAuth } = require("../middleware/auth");
+const paystackController = require("../controllers/paystackController");
+const { authenticateToken } = require("../middleware/auth");
 
 /**
  * Paystack Payment Routes
- * Uses your existing authentication middleware
+ * Mounted at /api/payments
  */
 
 // ============================================
@@ -16,7 +17,6 @@ const { authenticateToken, optionalAuth } = require("../middleware/auth");
  * @route   POST /api/payments/webhook
  * @desc    Handle Paystack webhook events
  * @access  Public (Paystack only)
- * @note    Validates webhook signature internally
  */
 router.post("/webhook", express.raw({ type: "application/json" }), (req, res) =>
   paystackController.handleWebhook(req, res),
@@ -35,7 +35,6 @@ router.get("/public-key", (req, res) =>
  * @route   GET /api/payments/callback
  * @desc    Handle redirect from Paystack checkout
  * @access  Public
- * @note    Redirects to frontend with payment reference
  */
 router.get("/callback", (req, res) => {
   const { reference, trxref } = req.query;
@@ -43,9 +42,11 @@ router.get("/callback", (req, res) => {
 
   // Redirect to frontend verification page
   const frontendUrl =
+    process.env.FRONTEND_URL ||
     process.env.VITE_API_URL?.replace("-backend", "-frontend") ||
     "http://localhost:3000";
-  res.redirect(`${frontendUrl}/payment/verify?reference=${ref}`);
+
+  res.redirect(`${frontendUrl}/order-success?reference=${ref}`);
 });
 
 // ============================================
@@ -55,8 +56,7 @@ router.get("/callback", (req, res) => {
 /**
  * @route   POST /api/payments/initialize
  * @desc    Initialize a new payment transaction
- * @access  Private (Authenticated users only)
- * @body    { email, amount, order_id?, metadata? }
+ * @access  Private
  */
 router.post("/initialize", authenticateToken, (req, res) =>
   paystackController.initializePayment(req, res),
@@ -65,8 +65,7 @@ router.post("/initialize", authenticateToken, (req, res) =>
 /**
  * @route   GET /api/payments/verify/:reference
  * @desc    Verify payment status
- * @access  Private (Authenticated users only)
- * @param   reference - Payment reference to verify
+ * @access  Private
  */
 router.get("/verify/:reference", authenticateToken, (req, res) =>
   paystackController.verifyPayment(req, res),
@@ -75,8 +74,7 @@ router.get("/verify/:reference", authenticateToken, (req, res) =>
 /**
  * @route   GET /api/payments/transactions
  * @desc    Get current user's transaction history
- * @access  Private (Authenticated users only)
- * @query   page, limit
+ * @access  Private
  */
 router.get("/transactions", authenticateToken, (req, res) =>
   paystackController.getUserTransactions(req, res),
@@ -85,8 +83,7 @@ router.get("/transactions", authenticateToken, (req, res) =>
 /**
  * @route   GET /api/payments/transaction/:reference
  * @desc    Get single transaction details
- * @access  Private (Authenticated users only)
- * @param   reference - Transaction reference
+ * @access  Private
  */
 router.get("/transaction/:reference", authenticateToken, (req, res) =>
   paystackController.getTransaction(req, res),
@@ -95,8 +92,7 @@ router.get("/transaction/:reference", authenticateToken, (req, res) =>
 /**
  * @route   POST /api/payments/charge
  * @desc    Charge a saved authorization (recurring payments)
- * @access  Private (Authenticated users only)
- * @body    { email, amount, authorization_code, order_id?, metadata? }
+ * @access  Private
  */
 router.post("/charge", authenticateToken, (req, res) =>
   paystackController.chargeAuthorization(req, res),
@@ -105,7 +101,7 @@ router.post("/charge", authenticateToken, (req, res) =>
 /**
  * @route   GET /api/payments/stats
  * @desc    Get payment statistics for current user
- * @access  Private (Authenticated users only)
+ * @access  Private
  */
 router.get("/stats", authenticateToken, async (req, res) => {
   try {
@@ -113,16 +109,14 @@ router.get("/stats", authenticateToken, async (req, res) => {
     const db = require("../config/database");
 
     const stats = await db.query(
-      `
-        SELECT 
-          COUNT(*) as total_transactions,
-          COUNT(CASE WHEN status = 'success' THEN 1 END) as successful_payments,
-          COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_payments,
-          COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_payments,
-          COALESCE(SUM(CASE WHEN status = 'success' THEN amount ELSE 0 END), 0) as total_amount_paid
-        FROM transactions
-        WHERE user_id = $1
-      `,
+      `SELECT 
+        COUNT(*) as total_transactions,
+        COUNT(CASE WHEN status = 'success' THEN 1 END) as successful_payments,
+        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_payments,
+        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_payments,
+        COALESCE(SUM(CASE WHEN status = 'success' THEN amount ELSE 0 END), 0) as total_amount_paid
+      FROM transactions
+      WHERE user_id = $1`,
       [userId],
     );
 
