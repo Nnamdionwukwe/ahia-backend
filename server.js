@@ -184,13 +184,13 @@ const routeFiles = [
     file: "./src/routes/analytics",
     name: "analytics",
   },
-
-  { path: "/api/payments", file: "./src/routes/payments", name: "payments" },
   {
     path: "/api/userRoutes",
     file: "./src/routes/userRoutes",
     name: "userRoutes",
   },
+
+  { path: "/api/payments", file: "./src/routes/payments", name: "payments" },
 ];
 
 routeFiles.forEach(({ path, file, name }) => {
