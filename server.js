@@ -11,7 +11,7 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" },
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     crossOriginEmbedderPolicy: false,
-  })
+  }),
 );
 
 // CORS Configuration
@@ -46,7 +46,7 @@ app.use(
     maxAge: 600,
     preflightContinue: false,
     optionsSuccessStatus: 204,
-  })
+  }),
 );
 
 app.options("*", cors());
@@ -183,6 +183,13 @@ const routeFiles = [
     path: "/api/analytics",
     file: "./src/routes/analytics",
     name: "analytics",
+  },
+
+  { path: "/api/payments", file: "./src/routes/payments", name: "payments" },
+  {
+    path: "/api/userRoutes",
+    file: "./src/routes/userRoutes",
+    name: "userRoutes",
   },
 ];
 
