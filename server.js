@@ -190,7 +190,7 @@ const routeFiles = [
     name: "userRoutes",
   },
 
-  { path: "/api/payments", file: "./src/routes/payments", name: "payments" },
+  { path: "/api/payments", file: "./src/routes/Payments", name: "payments" },
 ];
 
 routeFiles.forEach(({ path, file, name }) => {
