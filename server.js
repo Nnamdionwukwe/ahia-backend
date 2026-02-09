@@ -197,7 +197,7 @@ routeFiles.forEach(({ path, file, name }) => {
   try {
     console.log(`\n📍 Loading ${name} from ${file}...`);
 
-    // Clear the require cache to ensure fresh load
+    // Clear the require cache to ensure it fresh load
     delete require.cache[require.resolve(file)];
 
     const route = require(file);
