@@ -30,7 +30,7 @@ exports.checkout = async (req, res) => {
        JOIN product_variants pv ON c.product_variant_id = pv.id
        JOIN products p ON pv.product_id = p.id
        WHERE c.user_id = $1`,
-      [userId]
+      [userId],
     );
 
     if (cartItems.rows.length === 0) {
@@ -50,7 +50,7 @@ exports.checkout = async (req, res) => {
       const promo = await db.query(
         `SELECT discount_percentage FROM promotions 
          WHERE code = $1 AND expiry_date > NOW()`,
-        [promo_code]
+        [promo_code],
       );
 
       if (promo.rows.length > 0) {
@@ -71,7 +71,7 @@ exports.checkout = async (req, res) => {
       },
       userId,
       req.ip,
-      req.headers["user-agent"]
+      req.headers["user-agent"],
     );
 
     // Phase 5: Handle fraud result
@@ -99,7 +99,9 @@ exports.checkout = async (req, res) => {
         delivery_address,
         orderStatus,
         payment_method,
-      ]
+        req.body.gift_message || null, // <--- ADD THIS
+        req.body.shipping_method || "standard", // <--- ADD THIS
+      ],
     );
 
     // Add order items
@@ -116,7 +118,7 @@ exports.checkout = async (req, res) => {
           item.quantity,
           price,
           price * item.quantity,
-        ]
+        ],
       );
     }
 
@@ -129,7 +131,7 @@ exports.checkout = async (req, res) => {
       userId,
       orderId,
       "confirmed",
-      `Your order #${order.rows[0].id} has been confirmed!`
+      `Your order #${order.rows[0].id} has been confirmed!`,
     );
 
     // Phase 5: Award loyalty points
@@ -137,7 +139,7 @@ exports.checkout = async (req, res) => {
       userId,
       Math.floor(totalAmount * 10),
       `Purchase - Order #${order.rows[0].id}`,
-      orderId
+      orderId,
     );
 
     // Phase 5: Check for referral bonus
@@ -146,7 +148,7 @@ exports.checkout = async (req, res) => {
        SET status = 'completed', completed_at = NOW(), points_awarded = 500
        WHERE referred_user_id = $1 AND status = 'pending'
        RETURNING referrer_id`,
-      [userId]
+      [userId],
     );
 
     if (referral.rows.length > 0) {
@@ -154,7 +156,7 @@ exports.checkout = async (req, res) => {
       await loyaltyController.awardPoints(
         referral.rows[0].referrer_id,
         500,
-        "Referral bonus"
+        "Referral bonus",
       );
       await loyaltyController.awardPoints(userId, 100, "Welcome bonus");
     }
@@ -215,7 +217,7 @@ exports.getOrderDetails = async (req, res) => {
 
     const order = await db.query(
       `SELECT * FROM orders WHERE id = $1 AND user_id = $2`,
-      [orderId, userId]
+      [orderId, userId],
     );
 
     if (order.rows.length === 0) {
@@ -228,7 +230,7 @@ exports.getOrderDetails = async (req, res) => {
        JOIN product_variants pv ON oi.product_variant_id = pv.id
        JOIN products p ON pv.product_id = p.id
        WHERE oi.order_id = $1`,
-      [orderId]
+      [orderId],
     );
 
     res.json({
@@ -249,7 +251,7 @@ exports.cancelOrder = async (req, res) => {
 
     const order = await db.query(
       `SELECT status FROM orders WHERE id = $1 AND user_id = $2`,
-      [orderId, userId]
+      [orderId, userId],
     );
 
     if (order.rows.length === 0) {
@@ -262,7 +264,7 @@ exports.cancelOrder = async (req, res) => {
 
     const updated = await db.query(
       `UPDATE orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1 RETURNING *`,
-      [orderId]
+      [orderId],
     );
 
     // Phase 5: Send cancellation notification
@@ -270,7 +272,7 @@ exports.cancelOrder = async (req, res) => {
       userId,
       orderId,
       "cancelled",
-      `Your order #${orderId} has been cancelled`
+      `Your order #${orderId} has been cancelled`,
     );
 
     res.json({ success: true, order: updated.rows[0] });
