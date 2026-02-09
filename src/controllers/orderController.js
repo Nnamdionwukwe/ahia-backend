@@ -88,9 +88,9 @@ exports.checkout = async (req, res) => {
 
     const order = await db.query(
       `INSERT INTO orders 
-       (id, user_id, total_amount, discount_amount, delivery_address, status, payment_method, created_at, updated_at, estimated_delivery)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), NOW() + INTERVAL '5 days')
-       RETURNING *`,
+   (id, user_id, total_amount, discount_amount, delivery_address, status, payment_method, created_at, updated_at, estimated_delivery)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), NOW() + INTERVAL '5 days')
+   RETURNING *`,
       [
         orderId,
         userId,
@@ -99,8 +99,6 @@ exports.checkout = async (req, res) => {
         delivery_address,
         orderStatus,
         payment_method,
-        req.body.gift_message || null, // <--- ADD THIS
-        req.body.shipping_method || "standard", // <--- ADD THIS
       ],
     );
 
