@@ -15,7 +15,13 @@ const calculateTotal = (items) => {
 exports.checkout = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { delivery_address, payment_method, promo_code } = req.body;
+    const {
+      delivery_address,
+      payment_method,
+      promo_code,
+      total_amount,
+      discount_amount,
+    } = req.body;
 
     if (!delivery_address || !payment_method) {
       return res.status(400).json({
@@ -37,26 +43,30 @@ exports.checkout = async (req, res) => {
       return res.status(400).json({ error: "Cart is empty" });
     }
 
-    // Calculate total
-    let totalAmount = 0;
-    cartItems.rows.forEach((item) => {
-      const price =
-        item.base_price - (item.base_price * item.discount_percentage) / 100;
-      totalAmount += price * item.quantity;
-    });
+    // USE FRONTEND TOTALS if provided, otherwise calculate
+    let totalAmount = total_amount || 0;
+    let discountAmount = discount_amount || 0;
 
-    let discountAmount = 0;
-    if (promo_code) {
-      const promo = await db.query(
-        `SELECT discount_percentage FROM promotions 
+    // Only calculate if not provided from frontend
+    if (!total_amount) {
+      cartItems.rows.forEach((item) => {
+        const price =
+          item.base_price - (item.base_price * item.discount_percentage) / 100;
+        totalAmount += price * item.quantity;
+      });
+
+      if (promo_code) {
+        const promo = await db.query(
+          `SELECT discount_percentage FROM promotions 
          WHERE code = $1 AND expiry_date > NOW()`,
-        [promo_code],
-      );
+          [promo_code],
+        );
 
-      if (promo.rows.length > 0) {
-        discountAmount =
-          totalAmount * (promo.rows[0].discount_percentage / 100);
-        totalAmount -= discountAmount;
+        if (promo.rows.length > 0) {
+          discountAmount =
+            totalAmount * (promo.rows[0].discount_percentage / 100);
+          totalAmount -= discountAmount;
+        }
       }
     }
 
