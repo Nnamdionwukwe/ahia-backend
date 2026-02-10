@@ -116,6 +116,7 @@ class PaystackController {
   /**
    * Verify a payment transaction
    */
+  // In paystackController.js
   async verifyPayment(req, res) {
     const client = await db.pool.connect();
     try {
@@ -163,6 +164,9 @@ class PaystackController {
 
       const transaction = updateResult.rows[0];
 
+      console.log("=== TRANSACTION FOUND ===");
+      console.log("Transaction order_id:", transaction.order_id);
+
       // If payment successful, update order status
       if (paystackData.status === "success" && transaction.order_id) {
         await client.query(
@@ -187,7 +191,7 @@ class PaystackController {
           status: paystackData.status,
           amount: paystackData.amount / 100,
           reference,
-          order_id: transaction.order_id, // ADD THIS LINE
+          order_id: transaction.order_id, // CRITICAL: Include this
           customer: paystackData.customer,
           paid_at: paystackData.paid_at,
           channel: paystackData.channel,
