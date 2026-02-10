@@ -1,34 +1,42 @@
 const express = require("express");
 const router = express.Router();
-const { authenticateUser } = require("../middleware/auth"); // Ensure you have this
-const bankTransferController = require("../controllers/Banktransfercontroller");
+const {
+  initializeBankTransfer,
+  verifyBankTransfer,
+  confirmBankTransfer,
+  getBankTransferDetails,
+} = require("../controllers//Banktransfercontroller");
+const { authenticateToken } = require("../middleware/auth");
 
-// Initialize bank transfer
-router.post(
-  "/initialize",
-  authenticateUser,
-  bankTransferController.initializeBankTransfer,
-);
+// All routes require authentication
+router.use(authenticateToken);
 
-// Verify bank transfer (Admin or Manual Check)
-router.post(
-  "/verify",
-  authenticateUser,
-  bankTransferController.verifyBankTransfer,
-);
+/**
+ * @route   POST /api/payments/bank-transfer/initialize
+ * @desc    Initialize bank transfer payment
+ * @access  Private
+ */
+router.post("/initialize", initializeBankTransfer);
 
-// Confirm bank transfer
-router.post(
-  "/confirm",
-  authenticateUser,
-  bankTransferController.confirmBankTransfer,
-);
+/**
+ * @route   POST /api/payments/bank-transfer/verify
+ * @desc    Verify bank transfer payment status
+ * @access  Private
+ */
+router.post("/verify", verifyBankTransfer);
 
-// Get details
-router.get(
-  "/:reference",
-  authenticateUser,
-  bankTransferController.verifyBankTransfer,
-); // Reusing verify or create getDetails method
+/**
+ * @route   POST /api/payments/bank-transfer/confirm
+ * @desc    Confirm customer has made the transfer
+ * @access  Private
+ */
+router.post("/confirm", confirmBankTransfer);
+
+/**
+ * @route   GET /api/payments/bank-transfer/:reference
+ * @desc    Get bank transfer payment details
+ * @access  Private
+ */
+router.get("/:reference", getBankTransferDetails);
 
 module.exports = router;
