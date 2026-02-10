@@ -1,5 +1,5 @@
 const Order = require("../controllers/orderController");
-const Payment = require("../models/Payment");
+const Payment = require("../controllers/paymentController");
 const crypto = require("crypto");
 
 /**
