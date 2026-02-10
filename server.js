@@ -190,6 +190,12 @@ const routeFiles = [
     name: "userRoutes",
   },
 
+  {
+    path: "/api/bank-transfer",
+    file: "./src/routes/Banktransferroutes",
+    name: "bankTransferRoutes",
+  },
+
   { path: "/api/payments", file: "./src/routes/Payments", name: "payments" },
 ];
 
