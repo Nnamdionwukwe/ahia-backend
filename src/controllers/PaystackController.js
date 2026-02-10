@@ -139,12 +139,12 @@ class PaystackController {
 
       const updateResult = await client.query(
         `UPDATE transactions 
-         SET status = $1, 
-             verified_at = NOW(),
-             paystack_response = $2,
-             authorization_code = $3
-         WHERE reference = $4
-         RETURNING *`,
+       SET status = $1, 
+           verified_at = NOW(),
+           paystack_response = $2,
+           authorization_code = $3
+       WHERE reference = $4
+       RETURNING *`,
         [
           paystackData.status,
           JSON.stringify(paystackData),
@@ -167,10 +167,10 @@ class PaystackController {
       if (paystackData.status === "success" && transaction.order_id) {
         await client.query(
           `UPDATE orders 
-           SET payment_status = 'paid', 
-               status = 'processing',
-               updated_at = NOW()
-           WHERE id = $1`,
+         SET payment_status = 'paid', 
+             status = 'processing',
+             updated_at = NOW()
+         WHERE id = $1`,
           [transaction.order_id],
         );
       }
@@ -187,6 +187,7 @@ class PaystackController {
           status: paystackData.status,
           amount: paystackData.amount / 100,
           reference,
+          order_id: transaction.order_id, // ADD THIS LINE
           customer: paystackData.customer,
           paid_at: paystackData.paid_at,
           channel: paystackData.channel,
