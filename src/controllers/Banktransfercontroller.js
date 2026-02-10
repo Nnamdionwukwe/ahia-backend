@@ -308,16 +308,33 @@ exports.confirmBankTransfer = async (req, res) => {
       });
     }
 
+    // FIX: Safe Metadata Parsing
+    // We must ensure metadata is a valid JSON string before parsing it.
+    let existingMetadata = {};
+    try {
+      if (typeof payment.metadata === "string") {
+        existingMetadata = JSON.parse(payment.metadata);
+      } else if (
+        typeof payment.metadata === "object" &&
+        payment.metadata !== null
+      ) {
+        // Handle case where DB driver returns object directly
+        existingMetadata = payment.metadata;
+      }
+      // If null/undefined, default to {}
+    } catch (e) {
+      console.error("⚠️  Failed to parse existing metadata, resetting:", e);
+      existingMetadata = {};
+      // We don't return 500 error here to prevent cascading, just reset to safe default
+    }
+
     // Update payment status to processing
     await client.query(
       `UPDATE payments 
        SET status = 'processing', metadata = $1, updated_at = NOW() 
        WHERE id = $2`,
       [
-        JSON.stringify({
-          ...JSON.parse(payment.metadata),
-          confirmed_at: new Date(),
-        }),
+        JSON.stringify({ ...existingMetadata, confirmed_at: new Date() }),
         payment.id,
       ],
     );
