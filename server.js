@@ -191,7 +191,7 @@ const routeFiles = [
   },
 
   {
-    path: "/api/bank-transfer",
+    path: "/api/payments/bank-transfer",
     file: "./src/routes/Banktransferroutes",
     name: "bankTransferRoutes",
   },
