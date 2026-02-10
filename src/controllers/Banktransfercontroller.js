@@ -386,14 +386,50 @@ exports.getBankTransferDetails = async (req, res) => {
       });
     }
 
+    // FIX: Safe JSON parsing logic
+    let parsedMetadata;
+    if (typeof payment.metadata === "string") {
+      try {
+        // Try to parse if it's a string
+        parsedMetadata = JSON.parse(payment.metadata);
+      } catch (e) {
+        console.error("❌ Failed to parse metadata JSON:", e);
+        return res.status(500).json({
+          success: false,
+          message: "Invalid payment metadata configuration",
+          error: "Database metadata is malformed",
+        });
+      }
+    } else if (payment.metadata && typeof payment.metadata === "object") {
+      // Use directly if Postgres already parsed it (pg driver often does this)
+      parsedMetadata = payment.metadata;
+    } else {
+      console.error(
+        "❌ Metadata is missing or invalid type:",
+        typeof payment.metadata,
+      );
+      return res.status(500).json({
+        success: false,
+        message: "Payment metadata missing",
+      });
+    }
+
     // Get order details
     const orderResult = await db.query(`SELECT * FROM orders WHERE id = $1`, [
       payment.order_id,
     ]);
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Associated order not found",
+      });
+    }
+
     const order = orderResult.rows[0];
 
     // Calculate time remaining
-    const expiresAt = new Date(JSON.parse(payment.metadata).expires_at);
+    const expiresAt = new Date(parsedMetadata.expires_at);
     const now = new Date();
     const timeRemaining = Math.max(0, expiresAt - now);
     const hoursRemaining = Math.floor(timeRemaining / (1000 * 60 * 60));
@@ -402,6 +438,9 @@ exports.getBankTransferDetails = async (req, res) => {
     );
     const secondsRemaining = Math.floor((timeRemaining % (1000 * 60)) / 1000);
 
+    // Extract bank details from metadata
+    const bankDetails = parsedMetadata.bank_details || {};
+
     return res.status(200).json({
       success: true,
       data: {
@@ -409,14 +448,19 @@ exports.getBankTransferDetails = async (req, res) => {
         order_id: payment.order_id,
         amount: payment.amount,
         status: payment.status,
-        bank_details: JSON.parse(payment.metadata).bank_details,
+        bank_details: {
+          account_number: bankDetails.account_number || "N/A",
+          bank_name: bankDetails.bank_name || "N/A",
+          beneficiary_name: bankDetails.beneficiary_name || "N/A",
+          account_name: bankDetails.account_name || "N/A",
+        },
         time_remaining: {
           hours: hoursRemaining,
           minutes: minutesRemaining,
           seconds: secondsRemaining,
           formatted: `${hoursRemaining}:${minutesRemaining.toString().padStart(2, "0")}:${secondsRemaining.toString().padStart(2, "0")}`,
         },
-        expires_at: JSON.parse(payment.metadata).expires_at,
+        expires_at: parsedMetadata.expires_at,
         created_at: payment.created_at,
         order: {
           id: order.id,
