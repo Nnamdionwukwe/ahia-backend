@@ -353,3 +353,84 @@ exports.confirmBankTransfer = async (req, res) => {
     client.release();
   }
 };
+
+/**
+ * Get bank transfer details
+ * GET /api/payments/bank-transfer/:reference
+ */
+exports.getBankTransferDetails = async (req, res) => {
+  try {
+    const { reference } = req.params;
+    const userId = req.user.id;
+
+    // Find payment record
+    const paymentResult = await db.query(
+      `SELECT * FROM payments WHERE reference = $1`,
+      [reference],
+    );
+
+    if (paymentResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found",
+      });
+    }
+
+    const payment = paymentResult.rows[0];
+
+    // Verify user owns this payment
+    if (payment.user_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized access to payment",
+      });
+    }
+
+    // Get order details
+    const orderResult = await db.query(`SELECT * FROM orders WHERE id = $1`, [
+      payment.order_id,
+    ]);
+    const order = orderResult.rows[0];
+
+    // Calculate time remaining
+    const expiresAt = new Date(JSON.parse(payment.metadata).expires_at);
+    const now = new Date();
+    const timeRemaining = Math.max(0, expiresAt - now);
+    const hoursRemaining = Math.floor(timeRemaining / (1000 * 60 * 60));
+    const minutesRemaining = Math.floor(
+      (timeRemaining % (1000 * 60 * 60)) / (1000 * 60),
+    );
+    const secondsRemaining = Math.floor((timeRemaining % (1000 * 60)) / 1000);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        reference: payment.reference,
+        order_id: payment.order_id,
+        amount: payment.amount,
+        status: payment.status,
+        bank_details: JSON.parse(payment.metadata).bank_details,
+        time_remaining: {
+          hours: hoursRemaining,
+          minutes: minutesRemaining,
+          seconds: secondsRemaining,
+          formatted: `${hoursRemaining}:${minutesRemaining.toString().padStart(2, "0")}:${secondsRemaining.toString().padStart(2, "0")}`,
+        },
+        expires_at: JSON.parse(payment.metadata).expires_at,
+        created_at: payment.created_at,
+        order: {
+          id: order.id,
+          total_amount: order.total_amount,
+          items_count: order.items ? order.items.length : 0,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get bank transfer details error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get bank transfer details",
+      error: error.message,
+    });
+  }
+};
