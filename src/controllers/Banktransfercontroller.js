@@ -468,7 +468,7 @@ exports.getBankTransferDetails = async (req, res) => {
         bank_details: {
           account_number: bankDetails.account_number || "N/A",
           bank_name: bankDetails.bank_name || "N/A",
-          beneficiary_name: bankDetails.beneficiary_name || "N/A",
+          beneficiary_name: bankDetails.beneficiary_name || "AHIA Marketplace",
           account_name: bankDetails.account_name || "N/A",
         },
         time_remaining: {
