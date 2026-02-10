@@ -197,6 +197,18 @@ const routeFiles = [
   },
 
   { path: "/api/payments", file: "./src/routes/Payments", name: "payments" },
+
+  {
+    path: "/api/payments/opay",
+    file: "./src/routes/OpayRoutes",
+    name: "opayRoutes",
+  },
+
+  {
+    path: "/api/payments/apple-pay",
+    file: "./src/routes/ApplepayRoutes",
+    name: "applePayRoutes",
+  },
 ];
 
 routeFiles.forEach(({ path, file, name }) => {
