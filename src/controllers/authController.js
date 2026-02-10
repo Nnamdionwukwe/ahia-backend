@@ -27,7 +27,7 @@ function generateTokens(userId) {
 // Register with phone
 exports.register = async (req, res) => {
   try {
-    const { phoneNumber, password, full_name } = req.body;
+    const { phoneNumber, password, full_name, email } = req.body; // Add email
 
     if (!phoneNumber || !password || !full_name) {
       return res.status(400).json({
@@ -57,16 +57,16 @@ exports.register = async (req, res) => {
     const password_hash = await bcrypt.hash(password, 12);
     const userId = uuidv4();
 
+    // Include email in INSERT
     const user = await db.query(
-      `INSERT INTO users (id, phone_number, password_hash, full_name, signup_method, is_verified, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, 'phone', TRUE, NOW(), NOW())
-             RETURNING id, phone_number, full_name`,
-      [userId, phoneNumber, password_hash, full_name],
+      `INSERT INTO users (id, phone_number, email, password_hash, full_name, signup_method, is_verified, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, 'phone', TRUE, NOW(), NOW())
+             RETURNING id, phone_number, email, full_name`,
+      [userId, phoneNumber, email || null, password_hash, full_name],
     );
 
     const { accessToken, refreshToken } = generateTokens(user.rows[0].id);
 
-    // Fixed: Use Redis v3 syntax with separate arguments
     await redis.set(
       `refresh_token:${user.rows[0].id}`,
       refreshToken,
@@ -76,12 +76,73 @@ exports.register = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      user: user.rows[0],
+      user: user.rows[0], // Now includes email
       tokens: { accessToken, refreshToken },
     });
   } catch (error) {
     console.error("Registration error:", error);
     res.status(500).json({ error: "Registration failed" });
+  }
+};
+
+// Login with phone
+exports.login = async (req, res) => {
+  try {
+    const { phoneNumber, password } = req.body;
+
+    if (!phoneNumber || !password) {
+      return res.status(400).json({
+        error: "Phone number and password required",
+      });
+    }
+
+    const user = await db.query("SELECT * FROM users WHERE phone_number = $1", [
+      phoneNumber,
+    ]);
+
+    if (user.rows.length === 0) {
+      return res.status(401).json({
+        error: "Invalid phone number or password",
+      });
+    }
+
+    const userData = user.rows[0];
+
+    if (!userData.password_hash) {
+      return res.status(401).json({
+        error:
+          "This account was created with Google. Please sign in with Google.",
+      });
+    }
+
+    const passwordMatch = await bcrypt.compare(
+      password,
+      userData.password_hash,
+    );
+
+    if (!passwordMatch) {
+      return res.status(401).json({
+        error: "Invalid phone number or password",
+      });
+    }
+
+    const { accessToken, refreshToken } = generateTokens(userData.id);
+
+    await redis.set(`refresh_token:${userData.id}`, refreshToken, "EX", 604800);
+
+    res.json({
+      success: true,
+      user: {
+        id: userData.id,
+        phone_number: userData.phone_number,
+        email: userData.email, // Add email here
+        full_name: userData.full_name,
+      },
+      tokens: { accessToken, refreshToken },
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Login failed" });
   }
 };
 
