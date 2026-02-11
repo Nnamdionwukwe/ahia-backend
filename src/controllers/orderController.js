@@ -248,10 +248,39 @@ exports.getOrders = async (req, res) => {
 };
 
 // Get order details
+// Add this validation to orderController.js getOrderDetails function
+// Replace the existing function with this:
+
 exports.getOrderDetails = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id: orderId } = req.params;
+
+    // ⭐ CRITICAL VALIDATION ⭐
+    console.log("=== GET ORDER DETAILS ===");
+    console.log("Requested orderId:", orderId);
+    console.log("OrderId type:", typeof orderId);
+    console.log("UserId:", userId);
+
+    // Validate orderId is not undefined or 'undefined' string
+    if (!orderId || orderId === "undefined" || orderId === "null") {
+      console.error("❌ Invalid orderId received:", orderId);
+      return res.status(400).json({
+        error: "Invalid order ID",
+        received: orderId,
+      });
+    }
+
+    // Validate UUID format (basic check)
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(orderId)) {
+      console.error("❌ Invalid UUID format:", orderId);
+      return res.status(400).json({
+        error: "Invalid order ID format",
+        received: orderId,
+      });
+    }
 
     const order = await db.query(
       `SELECT * FROM orders WHERE id = $1 AND user_id = $2`,
@@ -259,6 +288,7 @@ exports.getOrderDetails = async (req, res) => {
     );
 
     if (order.rows.length === 0) {
+      console.log("❌ Order not found:", orderId);
       return res.status(404).json({ error: "Order not found" });
     }
 
@@ -271,13 +301,19 @@ exports.getOrderDetails = async (req, res) => {
       [orderId],
     );
 
+    console.log("✅ Order found:", orderId);
+    console.log("Items count:", items.rows.length);
+
     res.json({
       order: order.rows[0],
       items: items.rows,
     });
   } catch (error) {
     console.error("Get order details error:", error);
-    res.status(500).json({ error: "Failed to fetch order details" });
+    res.status(500).json({
+      error: "Failed to fetch order details",
+      message: error.message,
+    });
   }
 };
 
