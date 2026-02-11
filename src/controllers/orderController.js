@@ -1,4 +1,4 @@
-// src/controllers/orderController.js
+// src/controllers/orderController.js - UPDATED VERSION
 const db = require("../config/database");
 const redis = require("../config/redis");
 const { v4: uuidv4 } = require("uuid");
@@ -31,11 +31,11 @@ exports.checkout = async (req, res) => {
 
     // Get cart items
     const cartItems = await db.query(
-      `SELECT c.*, pv.base_price, pv.discount_percentage, p.id as product_id
+      `SELECT c.*, pv.base_price, pv.discount_percentage, p.id as product_id, p.name, p.images, pv.color, pv.size
        FROM carts c
        JOIN product_variants pv ON c.product_variant_id = pv.id
        JOIN products p ON pv.product_id = p.id
-       WHERE c.user_id = $1`,
+       WHERE c.user_id = $1 AND c.is_selected = true`,
       [userId],
     );
 
@@ -98,9 +98,9 @@ exports.checkout = async (req, res) => {
 
     const order = await db.query(
       `INSERT INTO orders 
-   (id, user_id, total_amount, discount_amount, delivery_address, status, payment_method, created_at, updated_at, estimated_delivery)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), NOW() + INTERVAL '5 days')
-   RETURNING *`,
+       (id, user_id, total_amount, discount_amount, delivery_address, status, payment_method, payment_status, created_at, updated_at, estimated_delivery)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), NOW() + INTERVAL '5 days')
+       RETURNING *`,
       [
         orderId,
         userId,
@@ -109,6 +109,7 @@ exports.checkout = async (req, res) => {
         delivery_address,
         orderStatus,
         payment_method,
+        "pending",
       ],
     );
 
@@ -130,8 +131,11 @@ exports.checkout = async (req, res) => {
       );
     }
 
-    // Clear cart
-    await db.query("DELETE FROM carts WHERE user_id = $1", [userId]);
+    // Clear selected cart items
+    await db.query(
+      "DELETE FROM carts WHERE user_id = $1 AND is_selected = true",
+      [userId],
+    );
     await redis.del(`cart:${userId}`);
 
     // Phase 5: Send order confirmation notification
@@ -181,17 +185,17 @@ exports.checkout = async (req, res) => {
   }
 };
 
-// Get user's orders
+// Get user's orders WITH ITEMS
 exports.getOrders = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { page = 1, limit = 10, status } = req.query;
+    const { page = 1, limit = 50, status } = req.query;
     const offset = (page - 1) * limit;
 
     let query = "SELECT * FROM orders WHERE user_id = $1";
     const params = [userId];
 
-    if (status) {
+    if (status && status !== "all") {
       query += ` AND status = $${params.length + 1}`;
       params.push(status);
     }
@@ -201,14 +205,40 @@ exports.getOrders = async (req, res) => {
     }`;
     params.push(limit, offset);
 
-    const orders = await db.query(query, params);
+    const ordersResult = await db.query(query, params);
+
+    // Fetch items for each order
+    const ordersWithItems = await Promise.all(
+      ordersResult.rows.map(async (order) => {
+        const itemsResult = await db.query(
+          `SELECT oi.*, p.name, p.images, pv.color, pv.size
+           FROM order_items oi
+           JOIN product_variants pv ON oi.product_variant_id = pv.id
+           JOIN products p ON pv.product_id = p.id
+           WHERE oi.order_id = $1`,
+          [order.id],
+        );
+
+        return {
+          ...order,
+          items: itemsResult.rows,
+          item_count: itemsResult.rows.length,
+        };
+      }),
+    );
+
+    // Get total count
+    const countQuery = `SELECT COUNT(*) FROM orders WHERE user_id = $1${status && status !== "all" ? ` AND status = $2` : ""}`;
+    const countParams =
+      status && status !== "all" ? [userId, status] : [userId];
+    const countResult = await db.query(countQuery, countParams);
 
     res.json({
-      orders: orders.rows,
+      orders: ordersWithItems,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: orders.rows.length,
+        total: parseInt(countResult.rows[0].count),
       },
     });
   } catch (error) {
@@ -258,7 +288,7 @@ exports.cancelOrder = async (req, res) => {
     const { id: orderId } = req.params;
 
     const order = await db.query(
-      `SELECT status FROM orders WHERE id = $1 AND user_id = $2`,
+      `SELECT status, payment_status FROM orders WHERE id = $1 AND user_id = $2`,
       [orderId, userId],
     );
 
@@ -266,7 +296,10 @@ exports.cancelOrder = async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    if (order.rows[0].status !== "pending") {
+    if (
+      order.rows[0].status !== "pending" &&
+      order.rows[0].payment_status !== "pending"
+    ) {
       return res.status(400).json({ error: "Can only cancel pending orders" });
     }
 
@@ -289,3 +322,5 @@ exports.cancelOrder = async (req, res) => {
     res.status(500).json({ error: "Failed to cancel order" });
   }
 };
+
+module.exports = exports;
