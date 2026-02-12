@@ -198,7 +198,7 @@ const routeFiles = [
 
   { path: "/api/payments", file: "./src/routes/Payments", name: "payments" },
   {
-    path: "/api/adminRoutes",
+    path: "/api/admin",
     file: "./src/routes/adminRoutes",
     name: "adminRoutes",
   },
