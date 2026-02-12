@@ -149,6 +149,31 @@ exports.requireVerification = (req, res, next) => {
   next();
 };
 
+// Add this to your existing middleware/auth.js file
+
+// Require admin role - Add this after requireVerification
+exports.requireAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      error: "Authentication required",
+    });
+  }
+
+  if (req.user.role !== "admin") {
+    return res.status(403).json({
+      error: "Access denied",
+      message: "Admin privileges required",
+      required: "admin",
+      current: req.user.role,
+    });
+  }
+
+  next();
+};
+
+// Alternative: You can also use the existing requireRole function like this:
+// exports.requireAdmin = exports.requireRole("admin");
+
 // Optional authentication (attach user if token present, but don't fail)
 exports.optionalAuth = async (req, res, next) => {
   try {
