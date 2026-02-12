@@ -1,74 +1,65 @@
-// src/routes/admin.js - CLEAN VERSION (with controller)
+// src/routes/adminRoutes.js
 const express = require("express");
 const router = express.Router();
-const { authenticateToken, requireRole } = require("../middleware/auth");
-const analyticsController = require("../controllers/analyticsController");
 const adminController = require("../controllers/adminController");
+const { authenticateToken, requireAdmin } = require("../middleware/auth");
 
 /**
  * Admin Routes
- * All routes require admin authentication
+ * Mounted at /api/admin
+ * All routes require authentication + admin role
  */
 
-// Apply admin authentication to all routes
-router.use(authenticateToken);
-router.use(requireRole("admin"));
+// Analytics
+router.get(
+  "/analytics/platform",
+  authenticateToken,
+  requireAdmin,
+  adminController.getPlatformAnalytics,
+);
 
-/**
- * ========================================
- * ANALYTICS ENDPOINTS
- * ========================================
- */
+// User Management
+router.get(
+  "/users",
+  authenticateToken,
+  requireAdmin,
+  adminController.getAllUsers,
+);
 
-// Get platform-wide analytics
-router.get("/analytics/platform", analyticsController.getPlatformAnalytics);
+router.get(
+  "/users/:userId",
+  authenticateToken,
+  requireAdmin,
+  adminController.getUserById,
+);
 
-// Get trending products
-router.get("/analytics/trending", analyticsController.getTrendingProducts);
+router.put(
+  "/users/:userId",
+  authenticateToken,
+  requireAdmin,
+  adminController.updateUser,
+);
 
-/**
- * ========================================
- * USER MANAGEMENT ENDPOINTS
- * ========================================
- */
+router.delete(
+  "/users/:userId",
+  authenticateToken,
+  requireAdmin,
+  adminController.deleteUser,
+);
 
-// Get all users with pagination and search
-router.get("/users", adminController.getUsers);
+// User status management
+router.patch(
+  "/users/:userId/verify",
+  authenticateToken,
+  requireAdmin,
+  adminController.verifyUser,
+);
 
-// Get single user details
-router.get("/users/:userId", adminController.getUserDetails);
-
-// Update user (admin action)
-router.put("/users/:userId", adminController.updateUser);
-
-// Delete user (admin action)
-router.delete("/users/:userId", adminController.deleteUser);
-
-/**
- * ========================================
- * ORDERS MANAGEMENT
- * ========================================
- */
-
-// Get all orders
-router.get("/orders", adminController.getOrders);
-
-/**
- * ========================================
- * PRODUCTS MANAGEMENT
- * ========================================
- */
-
-// Get all products (admin view)
-router.get("/products", adminController.getProducts);
-
-/**
- * ========================================
- * DASHBOARD STATS
- * ========================================
- */
-
-// Get dashboard overview stats
-router.get("/dashboard", adminController.getDashboardStats);
+router.patch(
+  "/users/:userId/role",
+  authenticateToken,
+  requireAdmin,
+  adminController.updateUserRole,
+);
 
 module.exports = router;
