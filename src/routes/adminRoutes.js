@@ -34,4 +34,28 @@ router.delete(
   adminController.deleteUser,
 );
 
+// Get user orders (admin viewing user's orders)
+router.get(
+  "/users/:userId/orders",
+  authenticateToken,
+  requireAdmin,
+  adminController.getUserOrders,
+);
+
+// Get user addresses (admin viewing user's addresses)
+router.get(
+  "/users/:userId/addresses",
+  authenticateToken,
+  requireAdmin,
+  adminController.getUserAddresses,
+);
+
+// Get user stats (admin viewing user's stats)
+router.get(
+  "/users/:userId/stats",
+  authenticateToken,
+  requireAdmin,
+  adminController.getUserStats,
+);
+
 module.exports = router;

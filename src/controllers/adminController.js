@@ -469,6 +469,133 @@ const adminController = {
       });
     }
   },
+
+  /**
+   * Get user orders (admin)
+   */
+  getUserOrders: async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { page = 1, limit = 10 } = req.query;
+      const offset = (page - 1) * limit;
+
+      const query = `
+        SELECT 
+          o.id,
+          o.total_amount,
+          o.discount_amount,
+          o.status,
+          o.payment_method,
+          o.created_at,
+          o.estimated_delivery,
+          COUNT(oi.id) as item_count
+        FROM orders o
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        WHERE o.user_id = $1
+        GROUP BY o.id
+        ORDER BY o.created_at DESC
+        LIMIT $2 OFFSET $3
+      `;
+
+      const result = await db.query(query, [userId, limit, offset]);
+
+      res.json({
+        success: true,
+        orders: result.rows,
+      });
+    } catch (error) {
+      console.error("Get user orders error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch user orders",
+      });
+    }
+  },
+
+  /**
+   * Get user addresses (admin)
+   */
+  getUserAddresses: async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const result = await db.query(
+        `SELECT 
+          id,
+          address_line1,
+          address_line2,
+          city,
+          state,
+          country,
+          postal_code,
+          is_default,
+          created_at
+        FROM addresses
+        WHERE user_id = $1
+        ORDER BY is_default DESC, created_at DESC`,
+        [userId],
+      );
+
+      res.json({
+        success: true,
+        addresses: result.rows,
+      });
+    } catch (error) {
+      console.error("Get user addresses error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch user addresses",
+      });
+    }
+  },
+
+  /**
+   * Get user stats (admin)
+   */
+  getUserStats: async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      // Get order stats
+      const orderStats = await db.query(
+        `SELECT 
+          COUNT(*) as total_orders,
+          COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders,
+          COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
+          COALESCE(SUM(total_amount), 0) as total_spent
+        FROM orders
+        WHERE user_id = $1`,
+        [userId],
+      );
+
+      // Get wishlist count
+      const wishlistCount = await db.query(
+        "SELECT COUNT(*) FROM wishlists WHERE user_id = $1",
+        [userId],
+      );
+
+      // Get cart count
+      const cartCount = await db.query(
+        "SELECT COUNT(*) FROM carts WHERE user_id = $1",
+        [userId],
+      );
+
+      res.json({
+        success: true,
+        stats: {
+          orders: orderStats.rows[0],
+          wishlist_items: parseInt(wishlistCount.rows[0].count),
+          cart_items: parseInt(cartCount.rows[0].count),
+        },
+      });
+    } catch (error) {
+      console.error("Get user stats error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch user statistics",
+      });
+    }
+  },
 };
 
 module.exports = adminController;
