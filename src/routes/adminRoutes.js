@@ -58,4 +58,24 @@ router.get(
   adminController.getUserStats,
 );
 
+// ========================================================
+// NEW ROUTES FOR ORDERS MANAGEMENT
+// ========================================================
+
+// Get all orders (with filtering and search)
+router.get(
+  "/orders",
+  authenticateToken,
+  requireAdmin,
+  adminController.getAllOrders,
+);
+
+// Update order status
+router.put(
+  "/orders/:orderId/status",
+  authenticateToken,
+  requireAdmin,
+  adminController.updateOrderStatus,
+);
+
 module.exports = router;

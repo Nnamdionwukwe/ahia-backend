@@ -596,6 +596,131 @@ const adminController = {
       });
     }
   },
+
+  // ========================================================
+  // NEW METHODS FOR ORDERS MANAGEMENT
+  // ========================================================
+
+  /**
+   * Get All Orders (Admin)
+   */
+  getAllOrders: async (req, res) => {
+    try {
+      const { status = "all", limit = 100, search = "" } = req.query;
+
+      let query = `
+        SELECT 
+          o.id,
+          o.status,
+          o.total_amount,
+          o.discount_amount,
+          o.payment_method,
+          o.payment_status,
+          o.created_at,
+          u.full_name as user_name, 
+          u.email as user_email,
+          COUNT(oi.id) as item_count
+        FROM orders o
+        JOIN users u ON o.user_id = u.id
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        WHERE 1=1
+      `;
+
+      const params = [];
+      let paramCount = 1;
+
+      // Filter by status
+      if (status && status !== "all") {
+        query += ` AND o.status = $${paramCount}`;
+        params.push(status);
+        paramCount++;
+      }
+
+      // Search by Order ID, Customer Name, or Email
+      if (search) {
+        query += ` AND (
+          o.id ILIKE $${paramCount} OR 
+          u.full_name ILIKE $${paramCount} OR 
+          u.email ILIKE $${paramCount}
+        )`;
+        params.push(`%${search}%`);
+        paramCount++;
+      }
+
+      query += `
+        GROUP BY o.id, o.status, o.total_amount, o.discount_amount, o.payment_method, o.payment_status, o.created_at, u.full_name, u.email
+        ORDER BY o.created_at DESC
+        LIMIT $${paramCount}
+      `;
+
+      params.push(limit);
+
+      const result = await db.query(query, params);
+
+      res.json({
+        success: true,
+        orders: result.rows,
+      });
+    } catch (error) {
+      console.error("Get all orders error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch orders",
+      });
+    }
+  },
+
+  /**
+   * Update Order Status
+   */
+  updateOrderStatus: async (req, res) => {
+    try {
+      const { orderId } = req.params;
+      const { status } = req.body;
+
+      // Validate status
+      const validStatuses = [
+        "pending",
+        "processing",
+        "shipped",
+        "delivered",
+        "cancelled",
+      ];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order status",
+        });
+      }
+
+      const result = await db.query(
+        `UPDATE orders 
+         SET status = $1, updated_at = NOW() 
+         WHERE id = $2 
+         RETURNING *`,
+        [status, orderId],
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `Order status updated to ${status}`,
+        order: result.rows[0],
+      });
+    } catch (error) {
+      console.error("Update order status error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to update order status",
+      });
+    }
+  },
 };
 
 module.exports = adminController;
