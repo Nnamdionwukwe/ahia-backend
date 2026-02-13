@@ -228,35 +228,33 @@ router.get("/types", (req, res) => {
 
 /**
  * @route   POST /api/notifications/test
- * @desc    Send a test notification (development only)
- * @access  Private
+ * @desc    Send a test notification to yourself
+ * @access  Private (any authenticated user can test)
  */
-if (process.env.NODE_ENV !== "production") {
-  router.post("/test", authenticateToken, async (req, res) => {
-    try {
-      const {
-        type = "promotion",
-        title = "Test Notification",
-        message = "This is a test",
-      } = req.body;
+router.post("/test", authenticateToken, async (req, res) => {
+  try {
+    const {
+      type = "promotion",
+      title = "Test Notification",
+      message = "This is a test",
+    } = req.body;
 
-      const notification = await notificationsController.createNotification(
-        req.user.id,
-        type,
-        title,
-        message,
-      );
+    const notification = await notificationsController.createNotification(
+      req.user.id,
+      type,
+      title,
+      message,
+    );
 
-      res.json({
-        success: true,
-        notification,
-        message: "Test notification sent",
-      });
-    } catch (error) {
-      console.error("Send test notification error:", error);
-      res.status(500).json({ error: "Failed to send test notification" });
-    }
-  });
-}
+    res.json({
+      success: true,
+      notification,
+      message: "Test notification sent",
+    });
+  } catch (error) {
+    console.error("Send test notification error:", error);
+    res.status(500).json({ error: "Failed to send test notification" });
+  }
+});
 
 module.exports = router;
