@@ -17,8 +17,8 @@ exports.getNotifications = async (req, res) => {
                WHEN n.type = 'price_drop' THEN p.name
              END as reference_data
       FROM notifications n
-      LEFT JOIN orders o ON o.id::text = n.reference_id AND n.type = 'order_update'
-      LEFT JOIN products p ON p.id::text = n.reference_id AND n.type = 'price_drop'
+      LEFT JOIN orders o ON n.reference_id::text = o.id::text AND n.type = 'order_update'
+      LEFT JOIN products p ON n.reference_id::text = p.id::text AND n.type = 'price_drop'
       WHERE n.user_id = $1
     `;
 
