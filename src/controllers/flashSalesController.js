@@ -1,5 +1,5 @@
 // src/controllers/flashSalesController.js
-// FIXED VERSION - Corrected query parameter handling
+// FIXED VERSION - Added updateFlashSale function
 const db = require("../config/database");
 const redis = require("../config/redis");
 const { v4: uuidv4 } = require("uuid");
@@ -553,6 +553,155 @@ exports.createFlashSale = async (req, res) => {
   } catch (error) {
     console.error("Create flash sale error:", error);
     res.status(500).json({ error: "Failed to create flash sale" });
+  }
+};
+
+// ✅ NEW: Update flash sale (full update)
+exports.updateFlashSale = async (req, res) => {
+  try {
+    const { flashSaleId } = req.params;
+    const {
+      title,
+      description,
+      startTime,
+      endTime,
+      productIds,
+      discountPercentage,
+      maxQuantity,
+    } = req.body;
+
+    if (!flashSaleId || flashSaleId === "undefined") {
+      return res.status(400).json({ error: "Valid flash sale ID is required" });
+    }
+
+    // Check if flash sale exists
+    const existingCheck = await db.query(
+      "SELECT id, status FROM flash_sales WHERE id = $1",
+      [flashSaleId],
+    );
+
+    if (existingCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Flash sale not found" });
+    }
+
+    // Validation
+    if (startTime && endTime && new Date(startTime) >= new Date(endTime)) {
+      return res
+        .status(400)
+        .json({ error: "End time must be after start time" });
+    }
+
+    if (
+      discountPercentage &&
+      (discountPercentage <= 0 || discountPercentage > 100)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Discount percentage must be between 1 and 100" });
+    }
+
+    // Update flash sale main data
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (title !== undefined) {
+      updates.push(`title = $${paramCount}`);
+      values.push(title);
+      paramCount++;
+    }
+
+    if (description !== undefined) {
+      updates.push(`description = $${paramCount}`);
+      values.push(description);
+      paramCount++;
+    }
+
+    if (startTime !== undefined) {
+      updates.push(`start_time = $${paramCount}`);
+      values.push(startTime);
+      paramCount++;
+    }
+
+    if (endTime !== undefined) {
+      updates.push(`end_time = $${paramCount}`);
+      values.push(endTime);
+      paramCount++;
+    }
+
+    if (discountPercentage !== undefined) {
+      updates.push(`discount_percentage = $${paramCount}`);
+      values.push(discountPercentage);
+      paramCount++;
+    }
+
+    if (updates.length > 0) {
+      values.push(flashSaleId);
+      const query = `
+        UPDATE flash_sales
+        SET ${updates.join(", ")}
+        WHERE id = $${paramCount}
+        RETURNING *
+      `;
+
+      await db.query(query, values);
+    }
+
+    // Update products if provided
+    if (Array.isArray(productIds) && productIds.length > 0) {
+      // Delete existing products
+      await db.query(
+        "DELETE FROM flash_sale_products WHERE flash_sale_id = $1",
+        [flashSaleId],
+      );
+
+      // Add new products
+      const flashSaleProducts = [];
+      for (const productId of productIds) {
+        const product = await db.query(
+          `INSERT INTO flash_sale_products (id, flash_sale_id, product_id, 
+                                             original_price, sale_price, 
+                                             max_quantity, sold_quantity, created_at)
+           SELECT $1, $2, $3, p.price, p.price * (1 - $4/100), $5, 0, NOW()
+           FROM products p 
+           WHERE p.id = $3
+           RETURNING *`,
+          [
+            uuidv4(),
+            flashSaleId,
+            productId,
+            discountPercentage || 10,
+            maxQuantity || 100,
+          ],
+        );
+
+        if (product.rows.length > 0) {
+          flashSaleProducts.push(product.rows[0]);
+        }
+      }
+    }
+
+    // Get updated flash sale
+    const updated = await db.query("SELECT * FROM flash_sales WHERE id = $1", [
+      flashSaleId,
+    ]);
+
+    // Clear caches
+    await redis.del("flash_sales:active");
+    await redis.del("flash_sales:list:*");
+    await redis.del(`flash_sale:${flashSaleId}`);
+
+    res.json({
+      success: true,
+      message: "Flash sale updated successfully",
+      flashSale: updated.rows[0],
+    });
+  } catch (error) {
+    console.error("Update flash sale error:", error);
+    res.status(500).json({
+      error: "Failed to update flash sale",
+      details: error.message,
+    });
   }
 };
 

@@ -30,6 +30,7 @@ router.get(
   "/:saleId/products",
   seasonalSalesController.getSeasonalSaleProducts,
 );
+
 router.get("/:saleId", seasonalSalesController.getSeasonalSaleById);
 
 // ========================================
@@ -43,11 +44,20 @@ router.post(
   seasonalSalesController.createSeasonalSale,
 );
 
+// Update seasonal sale status only
 router.patch(
   "/:saleId/status",
   authenticateToken,
   requireRole("admin"),
   seasonalSalesController.updateSeasonalSaleStatus,
+);
+
+// ✅ NEW: Full seasonal sale update
+router.put(
+  "/:saleId",
+  authenticateToken,
+  requireRole("admin"),
+  seasonalSalesController.updateSeasonalSale,
 );
 
 router.delete(

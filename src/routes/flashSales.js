@@ -59,11 +59,20 @@ router.post(
   flashSalesController.createFlashSale,
 );
 
+// Update flash sale status only
 router.put(
   "/:flashSaleId/status",
   authenticate,
   authorize("admin"),
   flashSalesController.updateFlashSaleStatus,
+);
+
+// ✅ NEW: Full flash sale update
+router.put(
+  "/:flashSaleId",
+  authenticate,
+  authorize("admin"),
+  flashSalesController.updateFlashSale,
 );
 
 router.delete(
