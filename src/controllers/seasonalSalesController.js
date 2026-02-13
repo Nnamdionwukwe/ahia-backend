@@ -1,4 +1,5 @@
 // src/controllers/seasonalSalesController.js
+// FIXED VERSION - Corrected query parameter handling
 const db = require("../config/database");
 const redis = require("../config/redis");
 const { v4: uuidv4 } = require("uuid");
@@ -110,10 +111,9 @@ exports.getAllSeasonalSalesByProductId = async (req, res) => {
   }
 };
 
-// Get all active seasonal sales (for homepage) — ONLY ONE definition
+// Get all active seasonal sales (for homepage)
 exports.getActiveSeasonalSales = async (req, res) => {
   try {
-    // ✅ No cache — matches flash sales pattern for consistency
     const now = new Date();
 
     const seasonalSales = await db.query(
@@ -153,7 +153,7 @@ exports.getActiveSeasonalSales = async (req, res) => {
   }
 };
 
-// Get all seasonal sales (with status filter for list view)
+// Get all seasonal sales (with status filter for list view) - FIXED
 exports.getAllSeasonalSales = async (req, res) => {
   try {
     const { status } = req.query;
@@ -175,14 +175,21 @@ exports.getAllSeasonalSales = async (req, res) => {
       WHERE 1=1
     `;
 
-    const params = [now];
+    const params = [];
+    let paramCount = 1;
 
     if (status === "active") {
-      query += ` AND ss.start_time <= $1 AND ss.end_time > $1 AND ss.is_active = true`;
+      query += ` AND ss.start_time <= $${paramCount} AND ss.end_time > $${paramCount} AND ss.is_active = true`;
+      params.push(now);
+      paramCount++;
     } else if (status === "upcoming") {
-      query += ` AND ss.start_time > $1`;
+      query += ` AND ss.start_time > $${paramCount}`;
+      params.push(now);
+      paramCount++;
     } else if (status === "ended") {
-      query += ` AND ss.end_time <= $1`;
+      query += ` AND ss.end_time <= $${paramCount}`;
+      params.push(now);
+      paramCount++;
     }
 
     query += ` GROUP BY ss.id ORDER BY ss.start_time DESC`;

@@ -1,5 +1,5 @@
 // src/controllers/flashSalesController.js
-// COMPLETE VERSION - MATCHES YOUR EXACT DATABASE SCHEMA
+// FIXED VERSION - Corrected query parameter handling
 const db = require("../config/database");
 const redis = require("../config/redis");
 const { v4: uuidv4 } = require("uuid");
@@ -97,7 +97,7 @@ exports.getActiveFlashSales = async (req, res) => {
   }
 };
 
-// Get all flash sales (list view)
+// Get all flash sales (list view) - FIXED
 exports.getAllFlashSales = async (req, res) => {
   try {
     const { status } = req.query;
@@ -119,14 +119,21 @@ exports.getAllFlashSales = async (req, res) => {
       WHERE 1=1
     `;
 
-    const params = [now];
+    const params = [];
+    let paramCount = 1;
 
     if (status === "active") {
-      query += ` AND fs.start_time <= $1 AND fs.end_time > $1 AND fs.status = 'active'`;
+      query += ` AND fs.start_time <= $${paramCount} AND fs.end_time > $${paramCount} AND fs.status = 'active'`;
+      params.push(now);
+      paramCount++;
     } else if (status === "upcoming" || status === "scheduled") {
-      query += ` AND fs.start_time > $1 AND fs.status = 'scheduled'`;
+      query += ` AND fs.start_time > $${paramCount} AND fs.status = 'scheduled'`;
+      params.push(now);
+      paramCount++;
     } else if (status === "ended") {
-      query += ` AND (fs.end_time <= $1 OR fs.status = 'ended')`;
+      query += ` AND (fs.end_time <= $${paramCount} OR fs.status = 'ended')`;
+      params.push(now);
+      paramCount++;
     }
 
     query += ` GROUP BY fs.id ORDER BY fs.start_time DESC`;
@@ -315,50 +322,6 @@ exports.getAllFlashSalesByProductId = async (req, res) => {
     res.json([]);
   }
 };
-// exports.getAllFlashSalesByProductId = async (req, res) => {
-//   try {
-//     const { productId } = req.params;
-
-//     if (!productId || productId === "undefined") {
-//       return res.json([]);
-//     }
-
-//     const now = new Date();
-
-//     const flashSales = await db.query(
-//       `SELECT DISTINCT
-//         fs.id,
-//         fs.title,
-//         fs.description,
-//         fs.start_time,
-//         fs.end_time,
-//         fs.status,
-//         fsp.sale_price,
-//         fsp.original_price,
-//         fsp.max_quantity,
-//         fsp.sold_quantity,
-//         (fsp.max_quantity - fsp.sold_quantity) as remaining_quantity,
-//         ROUND(((fsp.original_price - fsp.sale_price) / fsp.original_price) * 100) as discount_percentage
-//        FROM flash_sales fs
-//        JOIN flash_sale_products fsp ON fs.id = fsp.flash_sale_id
-//        WHERE fsp.product_id = $1
-//          AND fs.end_time > $2
-//        ORDER BY
-//          CASE
-//            WHEN fs.start_time <= $2 AND fs.end_time > $2 THEN 1
-//            WHEN fs.start_time > $2 THEN 2
-//            ELSE 3
-//          END,
-//          fs.start_time ASC`,
-//       [productId, now],
-//     );
-
-//     res.json(flashSales.rows);
-//   } catch (error) {
-//     console.error("Get all flash sales by product error:", error);
-//     res.json([]);
-//   }
-// };
 
 exports.getFlashSaleProducts = async (req, res) => {
   try {
@@ -733,8 +696,6 @@ exports.getFlashSaleAnalytics = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch analytics" });
   }
 };
-
-// Add this function to flashSalesController.js (before module.exports)
 
 // Get flash sale for a specific product
 exports.getFlashSaleByProductId = async (req, res) => {
