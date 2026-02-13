@@ -1,36 +1,33 @@
-// src/routes/notifications.js
+// src/routes/notifications.js - FIXED with SSE token auth
 const express = require("express");
 const router = express.Router();
+const jwt = require("jsonwebtoken");
 const { authenticateToken } = require("../middleware/auth");
 const notificationsController = require("../controllers/notificationsController");
+
+// Custom middleware for SSE endpoint that checks token in query param
+const authenticateSSE = (req, res, next) => {
+  // Check for token in query parameter (EventSource can't send headers)
+  const token = req.query.token;
+
+  if (!token) {
+    return res.status(401).json({ error: "No token provided" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = { id: decoded.userId };
+    next();
+  } catch (error) {
+    console.error("SSE token verification error:", error);
+    return res.status(401).json({ error: "Invalid token" });
+  }
+};
 
 /**
  * @route   GET /api/notifications
  * @desc    Get user's notifications
  * @access  Private
- * @query   page, limit, unreadOnly (true/false)
- * @example GET /api/notifications?page=1&limit=20&unreadOnly=true
- * @returns
- * {
- *   "notifications": [
- *     {
- *       "id": "uuid",
- *       "type": "order_update",
- *       "title": "Order Shipped",
- *       "message": "Your order #12345 has been shipped",
- *       "is_read": false,
- *       "created_at": "2024-01-10T10:00:00Z",
- *       "reference_data": "ORD-12345"
- *     }
- *   ],
- *   "total": 45,
- *   "unread": 12,
- *   "pagination": {
- *     "page": 1,
- *     "limit": 20,
- *     "pages": 3
- *   }
- * }
  */
 router.get("/", authenticateToken, notificationsController.getNotifications);
 
@@ -38,11 +35,6 @@ router.get("/", authenticateToken, notificationsController.getNotifications);
  * @route   GET /api/notifications/unread-count
  * @desc    Get count of unread notifications
  * @access  Private
- * @example GET /api/notifications/unread-count
- * @returns
- * {
- *   "count": 12
- * }
  */
 router.get("/unread-count", authenticateToken, async (req, res) => {
   try {
@@ -59,7 +51,7 @@ router.get("/unread-count", authenticateToken, async (req, res) => {
     // Fallback to database
     const result = await db.query(
       "SELECT COUNT(*) as count FROM notifications WHERE user_id = $1 AND is_read = false",
-      [userId]
+      [userId],
     );
 
     const count = parseInt(result.rows[0].count);
@@ -78,63 +70,39 @@ router.get("/unread-count", authenticateToken, async (req, res) => {
  * @route   PUT /api/notifications/:notificationId/read
  * @desc    Mark notification as read
  * @access  Private
- * @param   notificationId - UUID of notification
- * @example PUT /api/notifications/uuid-here/read
- * @returns
- * {
- *   "success": true
- * }
  */
 router.put(
   "/:notificationId/read",
   authenticateToken,
-  notificationsController.markAsRead
+  notificationsController.markAsRead,
 );
 
 /**
  * @route   PUT /api/notifications/read-all
  * @desc    Mark all notifications as read
  * @access  Private
- * @example PUT /api/notifications/read-all
- * @returns
- * {
- *   "success": true,
- *   "marked": 12
- * }
  */
 router.put(
   "/read-all",
   authenticateToken,
-  notificationsController.markAllAsRead
+  notificationsController.markAllAsRead,
 );
 
 /**
  * @route   DELETE /api/notifications/:notificationId
  * @desc    Delete a notification
  * @access  Private
- * @param   notificationId - UUID of notification
- * @example DELETE /api/notifications/uuid-here
- * @returns
- * {
- *   "success": true
- * }
  */
 router.delete(
   "/:notificationId",
   authenticateToken,
-  notificationsController.deleteNotification
+  notificationsController.deleteNotification,
 );
 
 /**
  * @route   DELETE /api/notifications/clear-all
  * @desc    Delete all read notifications
  * @access  Private
- * @example DELETE /api/notifications/clear-all
- * @returns
- * {
- *   "success": true,
- *   "deleted": 25
- * }
  */
 router.delete("/clear-all", authenticateToken, async (req, res) => {
   try {
@@ -143,7 +111,7 @@ router.delete("/clear-all", authenticateToken, async (req, res) => {
 
     const result = await db.query(
       "DELETE FROM notifications WHERE user_id = $1 AND is_read = true RETURNING id",
-      [userId]
+      [userId],
     );
 
     res.json({
@@ -160,95 +128,40 @@ router.delete("/clear-all", authenticateToken, async (req, res) => {
  * @route   GET /api/notifications/preferences
  * @desc    Get notification preferences
  * @access  Private
- * @example GET /api/notifications/preferences
- * @returns
- * {
- *   "id": "uuid",
- *   "order_updates": true,
- *   "price_drops": true,
- *   "flash_sales": true,
- *   "restock_alerts": true,
- *   "promotions": true,
- *   "push_enabled": true,
- *   "email_enabled": false
- * }
  */
 router.get(
   "/preferences",
   authenticateToken,
-  notificationsController.getPreferences
+  notificationsController.getPreferences,
 );
 
 /**
  * @route   PUT /api/notifications/preferences
  * @desc    Update notification preferences
  * @access  Private
- * @body    { order_updates, price_drops, flash_sales, restock_alerts, promotions, push_enabled, email_enabled }
- * @example
- * PUT /api/notifications/preferences
- * {
- *   "order_updates": true,
- *   "price_drops": true,
- *   "flash_sales": false,
- *   "restock_alerts": true,
- *   "promotions": false,
- *   "push_enabled": true,
- *   "email_enabled": false
- * }
- * @returns Updated preferences object
  */
 router.put(
   "/preferences",
   authenticateToken,
-  notificationsController.updatePreferences
+  notificationsController.updatePreferences,
 );
 
 /**
  * @route   GET /api/notifications/stream
  * @desc    Server-Sent Events stream for real-time notifications
- * @access  Private
- * @example
- * const eventSource = new EventSource('/api/notifications/stream', {
- *   headers: { 'Authorization': 'Bearer token' }
- * });
- * eventSource.onmessage = (event) => {
- *   const data = JSON.parse(event.data);
- *   if (data.type === 'unread_count') {
- *     updateBadge(data.count);
- *   } else {
- *     showNotification(data);
- *   }
- * };
- * @returns SSE stream with notification events
+ * @access  Private (token in query param)
+ * @note    EventSource doesn't support custom headers, so token must be in URL
  */
 router.get(
   "/stream",
-  authenticateToken,
-  notificationsController.streamNotifications
+  authenticateSSE, // ✅ Use custom SSE auth middleware
+  notificationsController.streamNotifications,
 );
 
 /**
  * @route   GET /api/notifications/types
- * @desc    Get available notification types and their descriptions
+ * @desc    Get available notification types
  * @access  Public
- * @example GET /api/notifications/types
- * @returns
- * {
- *   "types": [
- *     {
- *       "type": "order_update",
- *       "name": "Order Updates",
- *       "description": "Updates about your orders (shipped, delivered, etc.)",
- *       "canDisable": false
- *     },
- *     {
- *       "type": "price_drop",
- *       "name": "Price Drops",
- *       "description": "When items in your wishlist go on sale",
- *       "canDisable": true
- *     }
- *   ]
- * }
  */
 router.get("/types", (req, res) => {
   res.json({
@@ -317,14 +230,6 @@ router.get("/types", (req, res) => {
  * @route   POST /api/notifications/test
  * @desc    Send a test notification (development only)
  * @access  Private
- * @body    { type, title, message }
- * @example
- * POST /api/notifications/test
- * {
- *   "type": "order_update",
- *   "title": "Test Notification",
- *   "message": "This is a test notification"
- * }
  */
 if (process.env.NODE_ENV !== "production") {
   router.post("/test", authenticateToken, async (req, res) => {
@@ -339,7 +244,7 @@ if (process.env.NODE_ENV !== "production") {
         req.user.id,
         type,
         title,
-        message
+        message,
       );
 
       res.json({
