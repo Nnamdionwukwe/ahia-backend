@@ -1,4 +1,4 @@
-// src/controllers/notificationsController.js
+// src/controllers/notificationsController.js - FIXED VERSION
 const db = require("../config/database");
 const redis = require("../config/redis");
 const { v4: uuidv4 } = require("uuid");
@@ -17,8 +17,8 @@ exports.getNotifications = async (req, res) => {
                WHEN n.type = 'price_drop' THEN p.name
              END as reference_data
       FROM notifications n
-      LEFT JOIN orders o ON n.reference_id = o.id AND n.type = 'order_update'
-      LEFT JOIN products p ON n.reference_id = p.id AND n.type = 'price_drop'
+      LEFT JOIN orders o ON n.reference_id = o.id::text AND n.type = 'order_update'
+      LEFT JOIN products p ON n.reference_id = p.id::text AND n.type = 'price_drop'
       WHERE n.user_id = $1
     `;
 
@@ -69,7 +69,7 @@ exports.markAsRead = async (req, res) => {
        SET is_read = true, read_at = NOW()
        WHERE id = $1 AND user_id = $2
        RETURNING *`,
-      [notificationId, userId]
+      [notificationId, userId],
     );
 
     if (updated.rows.length === 0) {
@@ -96,7 +96,7 @@ exports.markAllAsRead = async (req, res) => {
        SET is_read = true, read_at = NOW()
        WHERE user_id = $1 AND is_read = false
        RETURNING id`,
-      [userId]
+      [userId],
     );
 
     // Update unread count
@@ -120,7 +120,7 @@ exports.deleteNotification = async (req, res) => {
 
     const deleted = await db.query(
       "DELETE FROM notifications WHERE id = $1 AND user_id = $2 RETURNING *",
-      [notificationId, userId]
+      [notificationId, userId],
     );
 
     if (deleted.rows.length === 0) {
@@ -139,25 +139,25 @@ exports.deleteNotification = async (req, res) => {
   }
 };
 
-// Get notification preferences
+// Get notification preferences - FIXED
 exports.getPreferences = async (req, res) => {
   try {
     const userId = req.user.id;
 
     const preferences = await db.query(
       "SELECT * FROM notification_preferences WHERE user_id = $1",
-      [userId]
+      [userId],
     );
 
     if (preferences.rows.length === 0) {
-      // Create default preferences
+      // Create default preferences with UUID
       const defaultPrefs = await db.query(
         `INSERT INTO notification_preferences 
-         (id, user_id, order_updates, price_drops, flash_sales, 
+         (user_id, order_updates, price_drops, flash_sales, 
           restock_alerts, promotions, push_enabled, email_enabled, created_at, updated_at)
-         VALUES ($1, $2, true, true, true, true, true, true, false, NOW(), NOW())
+         VALUES ($1, true, true, true, true, true, true, false, NOW(), NOW())
          RETURNING *`,
-        [uuidv4(), userId]
+        [userId],
       );
       return res.json(defaultPrefs.rows[0]);
     }
@@ -165,11 +165,14 @@ exports.getPreferences = async (req, res) => {
     res.json(preferences.rows[0]);
   } catch (error) {
     console.error("Get preferences error:", error);
-    res.status(500).json({ error: "Failed to fetch preferences" });
+    res.status(500).json({
+      error: "Failed to fetch preferences",
+      details: error.message,
+    });
   }
 };
 
-// Update notification preferences
+// Update notification preferences - FIXED
 exports.updatePreferences = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -185,22 +188,21 @@ exports.updatePreferences = async (req, res) => {
 
     const updated = await db.query(
       `INSERT INTO notification_preferences
-       (id, user_id, order_updates, price_drops, flash_sales,
+       (user_id, order_updates, price_drops, flash_sales,
         restock_alerts, promotions, push_enabled, email_enabled, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
        ON CONFLICT (user_id)
        DO UPDATE SET
-         order_updates = $3,
-         price_drops = $4,
-         flash_sales = $5,
-         restock_alerts = $6,
-         promotions = $7,
-         push_enabled = $8,
-         email_enabled = $9,
+         order_updates = $2,
+         price_drops = $3,
+         flash_sales = $4,
+         restock_alerts = $5,
+         promotions = $6,
+         push_enabled = $7,
+         email_enabled = $8,
          updated_at = NOW()
        RETURNING *`,
       [
-        uuidv4(),
         userId,
         order_updates,
         price_drops,
@@ -209,30 +211,33 @@ exports.updatePreferences = async (req, res) => {
         promotions,
         push_enabled,
         email_enabled,
-      ]
+      ],
     );
 
     res.json(updated.rows[0]);
   } catch (error) {
     console.error("Update preferences error:", error);
-    res.status(500).json({ error: "Failed to update preferences" });
+    res.status(500).json({
+      error: "Failed to update preferences",
+      details: error.message,
+    });
   }
 };
 
-// Create notification (internal use)
+// Create notification (internal use) - FIXED
 exports.createNotification = async (
   userId,
   type,
   title,
   message,
   referenceId = null,
-  priority = "normal"
+  priority = "normal",
 ) => {
   try {
     // Check user preferences
     const prefs = await db.query(
       "SELECT * FROM notification_preferences WHERE user_id = $1",
-      [userId]
+      [userId],
     );
 
     // Skip if user disabled this notification type
@@ -254,7 +259,7 @@ exports.createNotification = async (
        (id, user_id, type, title, message, reference_id, priority, is_read, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW())
        RETURNING *`,
-      [uuidv4(), userId, type, title, message, referenceId, priority]
+      [uuidv4(), userId, type, title, message, referenceId, priority],
     );
 
     // Increment unread count
@@ -263,7 +268,7 @@ exports.createNotification = async (
     // Publish to real-time channel (for WebSocket/SSE)
     await redis.publish(
       `notifications:${userId}`,
-      JSON.stringify(notification.rows[0])
+      JSON.stringify(notification.rows[0]),
     );
 
     return notification.rows[0];
@@ -282,13 +287,17 @@ exports.streamNotifications = async (req, res) => {
   res.setHeader("Connection", "keep-alive");
 
   // Send initial unread count
-  const unreadCount = (await redis.get(`unread_count:${userId}`)) || 0;
-  res.write(
-    `data: ${JSON.stringify({
-      type: "unread_count",
-      count: parseInt(unreadCount),
-    })}\n\n`
-  );
+  try {
+    const unreadCount = (await redis.get(`unread_count:${userId}`)) || 0;
+    res.write(
+      `data: ${JSON.stringify({
+        type: "unread_count",
+        count: parseInt(unreadCount),
+      })}\n\n`,
+    );
+  } catch (error) {
+    console.error("Failed to get initial unread count:", error);
+  }
 
   // Subscribe to Redis notifications
   const subscriber = redis.duplicate();
@@ -321,7 +330,7 @@ exports.streamNotifications = async (req, res) => {
 async function updateUnreadCount(userId) {
   const count = await db.query(
     "SELECT COUNT(*) as unread FROM notifications WHERE user_id = $1 AND is_read = false",
-    [userId]
+    [userId],
   );
   await redis.set(`unread_count:${userId}`, count.rows[0].unread);
 }
@@ -343,14 +352,14 @@ exports.checkPriceDrops = async () => {
          SELECT 1 FROM notifications n
          WHERE n.user_id = w.user_id
          AND n.type = 'price_drop'
-         AND n.reference_id = p.id
+         AND n.reference_id::text = p.id::text
          AND n.created_at > NOW() - INTERVAL '24 hours'
-       )`
+       )`,
     );
 
     for (const change of priceChanges.rows) {
       const discountPercentage = Math.round(
-        ((change.original_price - change.price) / change.original_price) * 100
+        ((change.original_price - change.price) / change.original_price) * 100,
       );
 
       await exports.createNotification(
@@ -359,7 +368,7 @@ exports.checkPriceDrops = async () => {
         "Price Drop Alert! 🔥",
         `${change.name} is now ${discountPercentage}% off! Get it before it's gone.`,
         change.id,
-        "high"
+        "high",
       );
     }
 
@@ -385,9 +394,9 @@ exports.checkRestockAlerts = async () => {
          SELECT 1 FROM notifications n
          WHERE n.user_id = w.user_id
          AND n.type = 'restock'
-         AND n.reference_id = p.id
+         AND n.reference_id::text = p.id::text
          AND n.created_at > NOW() - INTERVAL '24 hours'
-       )`
+       )`,
     );
 
     for (const item of restocked.rows) {
@@ -397,7 +406,7 @@ exports.checkRestockAlerts = async () => {
         "Back in Stock! ✨",
         `${item.name} is now available. Order before it sells out again!`,
         item.id,
-        "high"
+        "high",
       );
     }
 
@@ -412,7 +421,7 @@ exports.notifyOrderUpdate = async (userId, orderId, status, message) => {
   try {
     const order = await db.query(
       "SELECT order_number FROM orders WHERE id = $1",
-      [orderId]
+      [orderId],
     );
 
     if (order.rows.length === 0) return;
@@ -431,7 +440,7 @@ exports.notifyOrderUpdate = async (userId, orderId, status, message) => {
       titles[status] || "Order Update",
       message || `Your order #${order.rows[0].order_number} status: ${status}`,
       orderId,
-      "high"
+      "high",
     );
   } catch (error) {
     console.error("Notify order update error:", error);
@@ -447,7 +456,7 @@ exports.notifyFlashSale = async (userId, flashSaleId, title, message) => {
       title || "Flash Sale Started! ⚡",
       message,
       flashSaleId,
-      "high"
+      "high",
     );
   } catch (error) {
     console.error("Notify flash sale error:", error);
@@ -468,7 +477,7 @@ exports.sendCartReminder = async (userId, cartItems) => {
       "Don't forget your cart! 🛒",
       message,
       null,
-      "normal"
+      "normal",
     );
   } catch (error) {
     console.error("Send cart reminder error:", error);
@@ -490,7 +499,7 @@ exports.requestReview = async (userId, orderId, productId) => {
       "How was your purchase? ⭐",
       `We'd love to hear your thoughts on ${product.rows[0].name}. Your review helps others!`,
       productId,
-      "normal"
+      "normal",
     );
   } catch (error) {
     console.error("Request review error:", error);
@@ -503,28 +512,28 @@ exports.sendBulkNotification = async (
   type,
   title,
   message,
-  priority = "normal"
+  priority = "normal",
 ) => {
   try {
     const values = userIds
       .map(
         (userId, index) =>
-          `($${index * 6 + 1}, $${index * 6 + 2}, $${index * 6 + 3}, $${
-            index * 6 + 4
-          }, $${index * 6 + 5}, $${index * 6 + 6})`
+          `($${index * 7 + 1}, $${index * 7 + 2}, $${index * 7 + 3}, $${
+            index * 7 + 4
+          }, $${index * 7 + 5}, $${index * 7 + 6}, $${index * 7 + 7})`,
       )
       .join(",");
 
     const params = [];
     userIds.forEach((userId) => {
-      params.push(uuidv4(), userId, type, title, message, priority);
+      params.push(uuidv4(), userId, type, title, message, priority, false);
     });
 
     await db.query(
       `INSERT INTO notifications 
        (id, user_id, type, title, message, priority, is_read, created_at)
        VALUES ${values}`,
-      params
+      params,
     );
 
     // Update unread counts
@@ -532,7 +541,7 @@ exports.sendBulkNotification = async (
       await redis.incr(`unread_count:${userId}`);
       await redis.publish(
         `notifications:${userId}`,
-        JSON.stringify({ type, title, message, created_at: new Date() })
+        JSON.stringify({ type, title, message, created_at: new Date() }),
       );
     }
 
