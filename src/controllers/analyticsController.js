@@ -23,7 +23,7 @@ exports.trackEvent = async (req, res) => {
         JSON.stringify(eventData),
         req.headers["user-agent"],
         req.ip,
-      ]
+      ],
     );
 
     // Update real-time counters in Redis
@@ -69,7 +69,7 @@ exports.getUserAnalytics = async (req, res) => {
          AND created_at > NOW() - INTERVAL '${days} days'
        GROUP BY event_type, DATE(created_at)
        ORDER BY date DESC`,
-      [userId]
+      [userId],
     );
 
     // Get shopping behavior
@@ -84,7 +84,7 @@ exports.getUserAnalytics = async (req, res) => {
        FROM analytics_events
        WHERE user_id = $1
          AND created_at > NOW() - INTERVAL '${days} days'`,
-      [userId]
+      [userId],
     );
 
     // Get favorite categories
@@ -98,7 +98,7 @@ exports.getUserAnalytics = async (req, res) => {
        GROUP BY p.category
        ORDER BY views DESC
        LIMIT 5`,
-      [userId]
+      [userId],
     );
 
     res.json({
@@ -129,7 +129,7 @@ exports.getProductAnalytics = async (req, res) => {
        FROM analytics_events
        WHERE event_data->>'productId' = $1
          AND created_at > NOW() - INTERVAL '${days} days'`,
-      [productId]
+      [productId],
     );
 
     // Get views over time
@@ -144,7 +144,7 @@ exports.getProductAnalytics = async (req, res) => {
          AND created_at > NOW() - INTERVAL '${days} days'
        GROUP BY DATE(created_at)
        ORDER BY date ASC`,
-      [productId]
+      [productId],
     );
 
     // Calculate conversion rate
@@ -165,7 +165,7 @@ exports.getProductAnalytics = async (req, res) => {
        GROUP BY referrer
        ORDER BY count DESC
        LIMIT 10`,
-      [productId]
+      [productId],
     );
 
     res.json({
@@ -201,7 +201,7 @@ exports.getSellerAnalytics = async (req, res) => {
        WHERE p.seller_id = $1
          AND o.created_at > NOW() - INTERVAL '${days} days'
          AND o.status NOT IN ('cancelled', 'refunded')`,
-      [sellerId]
+      [sellerId],
     );
 
     // Get revenue over time
@@ -217,7 +217,7 @@ exports.getSellerAnalytics = async (req, res) => {
          AND o.created_at > NOW() - INTERVAL '${days} days'
        GROUP BY DATE(o.created_at)
        ORDER BY date ASC`,
-      [sellerId]
+      [sellerId],
     );
 
     // Get top selling products
@@ -235,7 +235,7 @@ exports.getSellerAnalytics = async (req, res) => {
        GROUP BY p.id
        ORDER BY revenue DESC
        LIMIT 10`,
-      [sellerId]
+      [sellerId],
     );
 
     // Get customer insights
@@ -255,7 +255,7 @@ exports.getSellerAnalytics = async (req, res) => {
        ) customer_orders ON o.user_id = customer_orders.user_id
        WHERE p.seller_id = $1
          AND o.created_at > NOW() - INTERVAL '${days} days'`,
-      [sellerId]
+      [sellerId],
     );
 
     res.json({
@@ -286,7 +286,7 @@ exports.getPlatformAnalytics = async (req, res) => {
            THEN ae.event_data->>'productId' END) as products_viewed,
          COUNT(CASE WHEN ae.event_type = 'purchase' THEN 1 END) as total_purchases
        FROM analytics_events ae
-       WHERE ae.created_at > NOW() - INTERVAL '${days} days'`
+       WHERE ae.created_at > NOW() - INTERVAL '${days} days'`,
     );
 
     // Popular products
@@ -300,7 +300,7 @@ exports.getPlatformAnalytics = async (req, res) => {
          AND ae.created_at > NOW() - INTERVAL '${days} days'
        GROUP BY p.id
        ORDER BY view_count DESC
-       LIMIT 10`
+       LIMIT 10`,
     );
 
     // Popular searches
@@ -313,7 +313,7 @@ exports.getPlatformAnalytics = async (req, res) => {
          AND ae.created_at > NOW() - INTERVAL '${days} days'
        GROUP BY query
        ORDER BY search_count DESC
-       LIMIT 20`
+       LIMIT 20`,
     );
 
     // Daily active users
@@ -324,7 +324,7 @@ exports.getPlatformAnalytics = async (req, res) => {
        FROM analytics_events
        WHERE created_at > NOW() - INTERVAL '${days} days'
        GROUP BY DATE(created_at)
-       ORDER BY date ASC`
+       ORDER BY date ASC`,
     );
 
     res.json({
@@ -371,30 +371,120 @@ async function trackSearch(query) {
 }
 
 // Get trending products from Redis
+// exports.getTrendingProducts = async (req, res) => {
+//   try {
+//     const limit = req.query.limit || 20;
+
+//     // Get top products from last 24 hours
+//     const productIds = await redis.zRevRange("hot_products", 0, limit - 1);
+
+//     if (productIds.length === 0) {
+//       return res.json({ products: [] });
+//     }
+
+//     const products = await db.query(
+//       `SELECT p.id, p.name, p.price, p.discount_percentage,
+//               p.images, p.rating, p.total_reviews, s.store_name
+//        FROM products p
+//        LEFT JOIN sellers s ON p.seller_id = s.id
+//        WHERE p.id = ANY($1)
+//          AND p.stock_quantity > 0`,
+//       [productIds]
+//     );
+
+//     res.json({ products: products.rows });
+//   } catch (error) {
+//     console.error("Get trending products error:", error);
+//     res.status(500).json({ error: "Failed to fetch trending products" });
+//   }
+// };
+// Replace the getTrendingProducts function in src/controllers/analyticsController.js
+// Find the existing function and replace it with this:
+
 exports.getTrendingProducts = async (req, res) => {
   try {
-    const limit = req.query.limit || 20;
+    const limit = parseInt(req.query.limit) || 20;
+    let productIds = [];
 
-    // Get top products from last 24 hours
-    const productIds = await redis.zRevRange("hot_products", 0, limit - 1);
-
-    if (productIds.length === 0) {
-      return res.json({ products: [] });
+    // Try Redis first — fall back gracefully if Redis is down or key doesn't exist
+    try {
+      // Handle both ioredis (zrevrange) and node-redis v4 (zRange with REV)
+      if (typeof redis.zrevrange === "function") {
+        // ioredis
+        productIds = await redis.zrevrange("hot_products", 0, limit - 1);
+      } else if (typeof redis.zRange === "function") {
+        // node-redis v4
+        productIds = await redis.zRange("hot_products", 0, limit - 1, {
+          REV: true,
+        });
+      } else if (typeof redis.zRevRange === "function") {
+        // node-redis v4 alternate
+        productIds = await redis.zRevRange("hot_products", 0, limit - 1);
+      }
+    } catch (redisError) {
+      console.warn(
+        "Redis unavailable for trending — falling back to DB:",
+        redisError.message,
+      );
+      productIds = [];
     }
 
+    // If no Redis data, fall back to most-viewed products from DB analytics_events
+    if (!productIds || productIds.length === 0) {
+      try {
+        const fallback = await db.query(
+          `SELECT DISTINCT (event_data->>'productId') as product_id,
+                  COUNT(*) as view_count
+           FROM analytics_events
+           WHERE event_type = 'product_view'
+             AND created_at > NOW() - INTERVAL '24 hours'
+             AND event_data->>'productId' IS NOT NULL
+           GROUP BY event_data->>'productId'
+           ORDER BY view_count DESC
+           LIMIT $1`,
+          [limit],
+        );
+        productIds = fallback.rows.map((r) => r.product_id).filter(Boolean);
+      } catch (dbErr) {
+        console.warn("analytics_events fallback failed:", dbErr.message);
+        productIds = [];
+      }
+    }
+
+    // If still no data, return most recently added products
+    if (!productIds || productIds.length === 0) {
+      const recent = await db.query(
+        `SELECT p.id, p.name, p.price, p.discount_percentage,
+                p.images, p.rating, p.total_reviews, s.store_name
+         FROM products p
+         LEFT JOIN sellers s ON p.seller_id = s.id
+         WHERE p.stock_quantity > 0
+         ORDER BY p.created_at DESC
+         LIMIT $1`,
+        [limit],
+      );
+      return res.json({ products: recent.rows, source: "recent" });
+    }
+
+    // Fetch product details for the collected IDs
     const products = await db.query(
       `SELECT p.id, p.name, p.price, p.discount_percentage,
               p.images, p.rating, p.total_reviews, s.store_name
        FROM products p
        LEFT JOIN sellers s ON p.seller_id = s.id
-       WHERE p.id = ANY($1)
+       WHERE p.id = ANY($1::uuid[])
          AND p.stock_quantity > 0`,
-      [productIds]
+      [productIds],
     );
 
-    res.json({ products: products.rows });
+    res.json({ products: products.rows, source: "trending" });
   } catch (error) {
     console.error("Get trending products error:", error);
-    res.status(500).json({ error: "Failed to fetch trending products" });
+    res
+      .status(500)
+      .json({
+        error: "Failed to fetch trending products",
+        details: error.message,
+      });
   }
 };
