@@ -202,6 +202,11 @@ const routeFiles = [
     file: "./src/routes/adminRoutes",
     name: "adminRoutes",
   },
+  {
+    path: "/api/admin/loyalty",
+    file: "./src/routes/adminLoyalty",
+    name: "adminLoyalty",
+  },
 ];
 
 routeFiles.forEach(({ path, file, name }) => {
