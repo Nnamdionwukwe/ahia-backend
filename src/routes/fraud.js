@@ -1,4 +1,4 @@
-// src/routes/fraud.js
+// src/routes/fraud.js - PATCHED
 const express = require("express");
 const router = express.Router();
 const { authenticateToken, requireRole } = require("../middleware/auth");
@@ -8,23 +8,13 @@ const fraudDetectionController = require("../controllers/fraudDetectionControlle
 // FRAUD CASE MANAGEMENT
 // =============================================
 
-/**
- * @route   GET /api/fraud/cases
- * @desc    Get fraud cases for manual review
- * @access  Admin/Support only
- */
 router.get(
   "/cases",
   authenticateToken,
   requireRole("admin", "support"),
-  fraudDetectionController.getFraudCases
+  fraudDetectionController.getFraudCases,
 );
 
-/**
- * @route   GET /api/fraud/cases/:fraudCheckId
- * @desc    Get detailed information about a specific fraud case
- * @access  Admin/Support only
- */
 router.get(
   "/cases/:fraudCheckId",
   authenticateToken,
@@ -34,7 +24,6 @@ router.get(
       const { fraudCheckId } = req.params;
       const db = require("../config/database");
 
-      // Get fraud check details with related data
       const fraudCheck = await db.query(
         `SELECT fc.*, 
                 u.full_name, u.phone_number, u.created_at as user_created_at,
@@ -46,7 +35,7 @@ router.get(
          LEFT JOIN users u ON fc.user_id = u.id
          LEFT JOIN orders o ON fc.order_id = o.id
          WHERE fc.id = $1`,
-        [fraudCheckId]
+        [fraudCheckId],
       );
 
       if (fraudCheck.rows.length === 0) {
@@ -55,7 +44,6 @@ router.get(
 
       const caseData = fraudCheck.rows[0];
 
-      // Get user order history
       const userHistory = await db.query(
         `SELECT 
            COUNT(DISTINCT o.id) as total_orders,
@@ -65,20 +53,18 @@ router.get(
            MAX(o.created_at) as last_order_date
          FROM orders o
          WHERE o.user_id = $1`,
-        [caseData.user_id]
+        [caseData.user_id],
       );
 
-      // Get other fraud checks for this user
       const userFraudHistory = await db.query(
         `SELECT id, risk_score, risk_level, action_taken, created_at
          FROM fraud_checks
          WHERE user_id = $1
          ORDER BY created_at DESC
          LIMIT 5`,
-        [caseData.user_id]
+        [caseData.user_id],
       );
 
-      // Get order items if order exists
       let orderItems = [];
       if (caseData.order_id) {
         const items = await db.query(
@@ -86,7 +72,7 @@ router.get(
            FROM order_items oi
            JOIN products p ON oi.product_id = p.id
            WHERE oi.order_id = $1`,
-          [caseData.order_id]
+          [caseData.order_id],
         );
         orderItems = items.rows;
       }
@@ -133,26 +119,25 @@ router.get(
       console.error("Get fraud case details error:", error);
       res.status(500).json({ error: "Failed to fetch fraud case details" });
     }
-  }
+  },
 );
 
-/**
- * @route   PUT /api/fraud/cases/:fraudCheckId/review
- * @desc    Manually review a fraud case
- * @access  Admin/Support only
- */
+// ✅ PUT (original) + POST (added for frontend compatibility)
 router.put(
   "/cases/:fraudCheckId/review",
   authenticateToken,
   requireRole("admin", "support"),
-  fraudDetectionController.reviewFraudCase
+  fraudDetectionController.reviewFraudCase,
 );
 
-/**
- * @route   POST /api/fraud/cases/:fraudCheckId/escalate
- * @desc    Escalate a fraud case to admin
- * @access  Support only
- */
+// ✅ ADDED: POST alias — frontend calls POST /api/admin/fraud/cases/:id/review
+router.post(
+  "/cases/:fraudCheckId/review",
+  authenticateToken,
+  requireRole("admin", "support"),
+  fraudDetectionController.reviewFraudCase,
+);
+
 router.post(
   "/cases/:fraudCheckId/escalate",
   authenticateToken,
@@ -175,16 +160,12 @@ router.post(
          )
          WHERE id = $1
          RETURNING *`,
-        [fraudCheckId, req.user.fullName, reason]
+        [fraudCheckId, req.user.fullName, reason],
       );
 
       if (updated.rows.length === 0) {
         return res.status(404).json({ error: "Fraud case not found" });
       }
-
-      // TODO: Send notification to admin team
-      // const notificationsController = require('../controllers/notificationsController');
-      // await notificationsController.notifyAdmins('fraud_case_escalated', fraudCheckId);
 
       res.json({
         success: true,
@@ -195,30 +176,20 @@ router.post(
       console.error("Escalate fraud case error:", error);
       res.status(500).json({ error: "Failed to escalate case" });
     }
-  }
+  },
 );
 
 // =============================================
 // FRAUD ANALYTICS
 // =============================================
 
-/**
- * @route   GET /api/fraud/analytics
- * @desc    Get fraud detection analytics and statistics
- * @access  Admin only
- */
 router.get(
   "/analytics",
   authenticateToken,
   requireRole("admin"),
-  fraudDetectionController.getFraudAnalytics
+  fraudDetectionController.getFraudAnalytics,
 );
 
-/**
- * @route   GET /api/fraud/stats/summary
- * @desc    Get high-level fraud statistics summary
- * @access  Admin only
- */
 router.get(
   "/stats/summary",
   authenticateToken,
@@ -227,7 +198,6 @@ router.get(
     try {
       const db = require("../config/database");
 
-      // Today's stats
       const today = await db.query(
         `SELECT 
            COUNT(*) as total_checks,
@@ -235,35 +205,32 @@ router.get(
            COUNT(CASE WHEN action_taken = 'block' THEN 1 END) as blocked_orders,
            AVG(risk_score) as avg_risk_score
          FROM fraud_checks
-         WHERE created_at > CURRENT_DATE`
+         WHERE created_at > CURRENT_DATE`,
       );
 
-      // This week's stats
       const thisWeek = await db.query(
         `SELECT 
            COUNT(*) as total_checks,
            COUNT(CASE WHEN risk_level IN ('high', 'critical') THEN 1 END) as high_risk_cases,
            COUNT(CASE WHEN action_taken = 'block' THEN 1 END) as blocked_orders
          FROM fraud_checks
-         WHERE created_at > CURRENT_DATE - INTERVAL '7 days'`
+         WHERE created_at > CURRENT_DATE - INTERVAL '7 days'`,
       );
 
-      // Pending review count
       const pendingReview = await db.query(
         `SELECT COUNT(*) as count
          FROM fraud_checks
          WHERE manual_review_decision IS NULL 
-         AND risk_level IN ('high', 'critical')`
+         AND risk_level IN ('high', 'critical')`,
       );
 
-      // False positive rate (cases marked as fraud but approved)
       const falsePositives = await db.query(
         `SELECT 
            COUNT(CASE WHEN risk_level IN ('high', 'critical') THEN 1 END) as high_risk_total,
            COUNT(CASE WHEN risk_level IN ('high', 'critical') AND manual_review_decision = 'approve' THEN 1 END) as approved
          FROM fraud_checks
          WHERE manual_review_decision IS NOT NULL
-         AND created_at > CURRENT_DATE - INTERVAL '30 days'`
+         AND created_at > CURRENT_DATE - INTERVAL '30 days'`,
       );
 
       const fpData = falsePositives.rows[0];
@@ -276,7 +243,7 @@ router.get(
         today: {
           ...today.rows[0],
           avg_risk_score: parseFloat(today.rows[0].avg_risk_score || 0).toFixed(
-            2
+            2,
           ),
         },
         thisWeek: thisWeek.rows[0],
@@ -288,14 +255,9 @@ router.get(
       console.error("Get fraud summary error:", error);
       res.status(500).json({ error: "Failed to fetch fraud summary" });
     }
-  }
+  },
 );
 
-/**
- * @route   GET /api/fraud/stats/trends
- * @desc    Get fraud trends over time
- * @access  Admin only
- */
 router.get(
   "/stats/trends",
   authenticateToken,
@@ -319,11 +281,11 @@ router.get(
          FROM fraud_checks
          WHERE created_at > NOW() - INTERVAL '${days} days'
          GROUP BY DATE(created_at)
-         ORDER BY date ASC`
+         ORDER BY date ASC`,
       );
 
       res.json({
-        period: period,
+        period,
         trends: trends.rows.map((row) => ({
           ...row,
           avg_risk_score: parseFloat(row.avg_risk_score).toFixed(2),
@@ -333,18 +295,13 @@ router.get(
       console.error("Get fraud trends error:", error);
       res.status(500).json({ error: "Failed to fetch fraud trends" });
     }
-  }
+  },
 );
 
 // =============================================
 // USER RISK PROFILES
 // =============================================
 
-/**
- * @route   GET /api/fraud/user/:userId/risk-profile
- * @desc    Get risk profile for a specific user
- * @access  Admin/Support only
- */
 router.get(
   "/user/:userId/risk-profile",
   authenticateToken,
@@ -354,28 +311,24 @@ router.get(
       const { userId } = req.params;
       const db = require("../config/database");
 
-      // Get risk profile
       const profile = await db.query(
         "SELECT * FROM user_risk_profiles WHERE user_id = $1",
-        [userId]
+        [userId],
       );
 
-      // Get recent fraud checks
       const recentChecks = await db.query(
         `SELECT id, risk_score, risk_level, action_taken, created_at
          FROM fraud_checks
          WHERE user_id = $1
          ORDER BY created_at DESC
          LIMIT 10`,
-        [userId]
+        [userId],
       );
 
-      // Get user info
       const user = await db.query(
         `SELECT id, full_name, phone_number, created_at, is_verified
-         FROM users
-         WHERE id = $1`,
-        [userId]
+         FROM users WHERE id = $1`,
+        [userId],
       );
 
       if (user.rows.length === 0) {
@@ -393,14 +346,9 @@ router.get(
       console.error("Get user risk profile error:", error);
       res.status(500).json({ error: "Failed to fetch risk profile" });
     }
-  }
+  },
 );
 
-/**
- * @route   POST /api/fraud/user/:userId/whitelist
- * @desc    Add user to whitelist (trusted users)
- * @access  Admin only
- */
 router.post(
   "/user/:userId/whitelist",
   authenticateToken,
@@ -411,7 +359,6 @@ router.post(
       const { reason } = req.body;
       const db = require("../config/database");
 
-      // Update user risk profile to mark as whitelisted
       await db.query(
         `INSERT INTO user_risk_profiles (id, user_id, current_risk_score, is_whitelisted, whitelist_reason, updated_at)
          VALUES (gen_random_uuid(), $1, 0, true, $2, NOW())
@@ -421,25 +368,17 @@ router.post(
            whitelist_reason = $2,
            current_risk_score = 0,
            updated_at = NOW()`,
-        [userId, reason || "Manually whitelisted by admin"]
+        [userId, reason || "Manually whitelisted by admin"],
       );
 
-      res.json({
-        success: true,
-        message: "User added to whitelist",
-      });
+      res.json({ success: true, message: "User added to whitelist" });
     } catch (error) {
       console.error("Whitelist user error:", error);
       res.status(500).json({ error: "Failed to whitelist user" });
     }
-  }
+  },
 );
 
-/**
- * @route   DELETE /api/fraud/user/:userId/whitelist
- * @desc    Remove user from whitelist
- * @access  Admin only
- */
 router.delete(
   "/user/:userId/whitelist",
   authenticateToken,
@@ -451,33 +390,23 @@ router.delete(
 
       await db.query(
         `UPDATE user_risk_profiles
-         SET is_whitelisted = false,
-             whitelist_reason = NULL,
-             updated_at = NOW()
+         SET is_whitelisted = false, whitelist_reason = NULL, updated_at = NOW()
          WHERE user_id = $1`,
-        [userId]
+        [userId],
       );
 
-      res.json({
-        success: true,
-        message: "User removed from whitelist",
-      });
+      res.json({ success: true, message: "User removed from whitelist" });
     } catch (error) {
       console.error("Remove whitelist error:", error);
       res.status(500).json({ error: "Failed to remove from whitelist" });
     }
-  }
+  },
 );
 
 // =============================================
-// FRAUD RULES MANAGEMENT
+// FRAUD RULES (read-only config)
 // =============================================
 
-/**
- * @route   GET /api/fraud/rules
- * @desc    Get current fraud detection rules and thresholds
- * @access  Admin only
- */
 router.get("/rules", authenticateToken, requireRole("admin"), (req, res) => {
   res.json({
     riskLevels: {
