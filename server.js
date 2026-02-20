@@ -173,7 +173,6 @@ const routeFiles = [
   { path: "/api/search", file: "./src/routes/search", name: "search" },
   { path: "/api/chat", file: "./src/routes/chat", name: "chat" },
   { path: "/api/loyalty", file: "./src/routes/loyalty", name: "loyalty" },
-  { path: "/api/fraud", file: "./src/routes/fraud", name: "fraud" },
   {
     path: "/api/notifications",
     file: "./src/routes/notifications",
