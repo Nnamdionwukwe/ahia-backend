@@ -217,7 +217,7 @@ const routeFiles = [
     name: "fraud",
   },
   {
-    path: "/api/admin/reviews",
+    path: "/api/admin/adminReviews",
     file: "./src/routes/adminReviews",
     name: "adminReviews",
   },
