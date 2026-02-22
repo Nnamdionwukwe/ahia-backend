@@ -22,7 +22,6 @@ async function updateProductRating(productId) {
 
 // ── Helper: bust all review-related cache for a product ───────────────────────
 async function bustReviewCache(productId) {
-  // Redis doesn't support wildcard DEL natively — scan & delete matching keys
   const keys = await redis.keys(`reviews:${productId}:*`);
   if (keys.length) await redis.del(...keys);
   await redis.del(`review_summary:${productId}`);
@@ -31,7 +30,6 @@ async function bustReviewCache(productId) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/reviews/:productId/add
-// Body: { rating, comment, images[], hide_profile }
 // ─────────────────────────────────────────────────────────────────────────────
 exports.addReview = async (req, res) => {
   try {
@@ -43,7 +41,6 @@ exports.addReview = async (req, res) => {
       return res.status(400).json({ error: "Rating must be between 1 and 5" });
     }
 
-    // Prevent duplicate review for the same product
     const existing = await db.query(
       "SELECT id FROM reviews WHERE product_id = $1 AND user_id = $2",
       [productId, userId],
@@ -82,7 +79,6 @@ exports.addReview = async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUT /api/reviews/:reviewId/edit
-// Body: { rating, comment, images[], hide_profile }
 // ─────────────────────────────────────────────────────────────────────────────
 exports.editReview = async (req, res) => {
   try {
@@ -94,7 +90,6 @@ exports.editReview = async (req, res) => {
       return res.status(400).json({ error: "Rating must be between 1 and 5" });
     }
 
-    // Verify ownership
     const existing = await db.query(
       "SELECT * FROM reviews WHERE id = $1 AND user_id = $2",
       [reviewId, userId],
@@ -136,7 +131,7 @@ exports.editReview = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DELETE /api/reviews/:reviewId
+// DELETE /api/reviews/:reviewId  (user — own reviews only)
 // ─────────────────────────────────────────────────────────────────────────────
 exports.deleteReview = async (req, res) => {
   try {
@@ -156,7 +151,6 @@ exports.deleteReview = async (req, res) => {
     const { product_id } = existing.rows[0];
 
     await db.query("DELETE FROM reviews WHERE id = $1", [reviewId]);
-
     await updateProductRating(product_id);
     await bustReviewCache(product_id);
 
@@ -169,13 +163,11 @@ exports.deleteReview = async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/reviews/user/me
-// Returns: { pending: [...], reviewed: [...] }  — used by the Reviews page
 // ─────────────────────────────────────────────────────────────────────────────
 exports.getUserReviews = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Items the user purchased but hasn't reviewed yet
     const pending = await db.query(
       `SELECT DISTINCT p.id, p.name, p.images, oi.variant_id,
               pv.name AS variant
@@ -193,7 +185,6 @@ exports.getUserReviews = async (req, res) => {
       [userId],
     );
 
-    // Reviews the user has already written
     const reviewed = await db.query(
       `SELECT r.*, p.name AS product_name, p.images AS product_images,
               pv.name AS variant
@@ -205,10 +196,8 @@ exports.getUserReviews = async (req, res) => {
       [userId],
     );
 
-    // Helpful count for the user's reviews
     const helpfulResult = await db.query(
-      `SELECT COALESCE(SUM(helpful_count), 0) AS total
-       FROM reviews WHERE user_id = $1`,
+      `SELECT COALESCE(SUM(helpful_count), 0) AS total FROM reviews WHERE user_id = $1`,
       [userId],
     );
 
@@ -220,13 +209,12 @@ exports.getUserReviews = async (req, res) => {
         variant: row.variant || "",
         image: (() => {
           try {
-            const imgs = JSON.parse(row.images || "[]");
-            return imgs[0] || "";
+            return JSON.parse(row.images || "[]")[0] || "";
           } catch {
             return "";
           }
         })(),
-        waitingCount: "999+", // placeholder; replace with real demand metric if available
+        waitingCount: "999+",
       })),
       reviewed: reviewed.rows.map((row) => ({
         id: row.id,
@@ -235,8 +223,7 @@ exports.getUserReviews = async (req, res) => {
         variant: row.variant || "",
         image: (() => {
           try {
-            const imgs = JSON.parse(row.product_images || "[]");
-            return imgs[0] || "";
+            return JSON.parse(row.product_images || "[]")[0] || "";
           } catch {
             return "";
           }
@@ -268,7 +255,6 @@ exports.getUserReviews = async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/reviews/user/orders
-// Returns delivered orders with their items — used by ChooseOrderSheet
 // ─────────────────────────────────────────────────────────────────────────────
 exports.getUserOrders = async (req, res) => {
   try {
@@ -318,8 +304,6 @@ exports.getUserOrders = async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/reviews/bulk
-// Body: { reviews: [{ productId, rating, comment, images[], hide_profile }] }
-// Used by LeaveAllReviews — submits all reviews for an order at once
 // ─────────────────────────────────────────────────────────────────────────────
 exports.submitAllReviews = async (req, res) => {
   try {
@@ -346,7 +330,6 @@ exports.submitAllReviews = async (req, res) => {
         continue;
       }
 
-      // Skip duplicates silently
       const existing = await db.query(
         "SELECT id FROM reviews WHERE product_id = $1 AND user_id = $2",
         [productId, userId],
@@ -381,12 +364,14 @@ exports.submitAllReviews = async (req, res) => {
       }
     }
 
-    res.status(201).json({
-      success: true,
-      submitted: results.length,
-      reviews: results,
-      errors,
-    });
+    res
+      .status(201)
+      .json({
+        success: true,
+        submitted: results.length,
+        reviews: results,
+        errors,
+      });
   } catch (error) {
     console.error("Submit all reviews error:", error);
     res.status(500).json({ error: "Failed to submit reviews" });
@@ -490,14 +475,12 @@ exports.getReviewSummary = async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUT /api/reviews/:reviewId/helpful
-// Toggles helpful — if user already marked helpful, it removes their mark
 // ─────────────────────────────────────────────────────────────────────────────
 exports.markHelpful = async (req, res) => {
   try {
     const userId = req.user.id;
     const { reviewId } = req.params;
 
-    // Check if user already marked this review helpful
     const alreadyMarked = await db.query(
       "SELECT id FROM review_helpful WHERE review_id = $1 AND user_id = $2",
       [reviewId, userId],
@@ -506,7 +489,6 @@ exports.markHelpful = async (req, res) => {
     let helpful_count;
 
     if (alreadyMarked.rows.length) {
-      // Toggle OFF — remove mark
       await db.query(
         "DELETE FROM review_helpful WHERE review_id = $1 AND user_id = $2",
         [reviewId, userId],
@@ -518,7 +500,6 @@ exports.markHelpful = async (req, res) => {
       helpful_count = updated.rows[0].helpful_count;
       await bustReviewCache(updated.rows[0].product_id);
     } else {
-      // Toggle ON — add mark
       await db.query(
         "INSERT INTO review_helpful (id, review_id, user_id, created_at) VALUES ($1, $2, $3, NOW())",
         [uuidv4(), reviewId, userId],
@@ -539,5 +520,241 @@ exports.markHelpful = async (req, res) => {
   } catch (error) {
     console.error("Mark helpful error:", error);
     res.status(500).json({ error: "Failed to update helpful count" });
+  }
+};
+
+// =============================================================================
+// ADMIN CONTROLLERS
+// =============================================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/reviews
+// Query: page, limit, rating, sort, search, product_id
+// ─────────────────────────────────────────────────────────────────────────────
+exports.adminGetAllReviews = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      rating,
+      sort = "recent",
+      search,
+      product_id,
+    } = req.query;
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const params = [];
+    const where = [];
+
+    if (rating) {
+      params.push(parseInt(rating));
+      where.push(`r.rating = $${params.length}`);
+    }
+
+    if (product_id) {
+      params.push(product_id);
+      where.push(`r.product_id = $${params.length}`);
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      where.push(
+        `(u.full_name ILIKE $${params.length} OR p.name ILIKE $${params.length} OR r.comment ILIKE $${params.length})`,
+      );
+    }
+
+    const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const orderMap = {
+      recent: "r.created_at DESC",
+      oldest: "r.created_at ASC",
+      highest: "r.rating DESC, r.created_at DESC",
+      lowest: "r.rating ASC, r.created_at DESC",
+      helpful: "r.helpful_count DESC, r.created_at DESC",
+    };
+    const orderBy = orderMap[sort] || orderMap.recent;
+
+    // Count
+    const countResult = await db.query(
+      `SELECT COUNT(*) AS total
+       FROM reviews r
+       LEFT JOIN users    u ON r.user_id    = u.id
+       LEFT JOIN products p ON r.product_id = p.id
+       ${whereClause}`,
+      params,
+    );
+
+    // Rows
+    const dataParams = [...params, parseInt(limit), offset];
+    const reviews = await db.query(
+      `SELECT
+         r.id,
+         r.rating,
+         r.comment,
+         r.images,
+         r.helpful_count,
+         r.hide_profile,
+         r.created_at,
+         r.updated_at,
+         r.product_id,
+         p.name   AS product_name,
+         r.user_id,
+         CASE WHEN r.hide_profile THEN 'Anonymous' ELSE u.full_name   END AS user_name,
+         CASE WHEN r.hide_profile THEN NULL         ELSE u.email       END AS user_email,
+         CASE WHEN r.hide_profile THEN NULL         ELSE u.profile_image END AS user_avatar
+       FROM reviews r
+       LEFT JOIN users    u ON r.user_id    = u.id
+       LEFT JOIN products p ON r.product_id = p.id
+       ${whereClause}
+       ORDER BY ${orderBy}
+       LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      dataParams,
+    );
+
+    const total = parseInt(countResult.rows[0].total);
+
+    res.json({
+      success: true,
+      data: {
+        reviews: reviews.rows.map((r) => ({
+          ...r,
+          images: (() => {
+            try {
+              return JSON.parse(r.images || "[]");
+            } catch {
+              return [];
+            }
+          })(),
+        })),
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Admin get all reviews error:", error);
+    res.status(500).json({ error: "Failed to fetch reviews" });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/admin/reviews/:reviewId  (admin — any review)
+// ─────────────────────────────────────────────────────────────────────────────
+exports.adminDeleteReview = async (req, res) => {
+  try {
+    const { reviewId } = req.params;
+
+    const existing = await db.query("SELECT * FROM reviews WHERE id = $1", [
+      reviewId,
+    ]);
+    if (!existing.rows.length) {
+      return res.status(404).json({ error: "Review not found" });
+    }
+
+    const { product_id } = existing.rows[0];
+
+    await db.query("DELETE FROM reviews WHERE id = $1", [reviewId]);
+    await updateProductRating(product_id);
+    await bustReviewCache(product_id);
+
+    res.json({ success: true, message: "Review deleted by admin" });
+  } catch (error) {
+    console.error("Admin delete review error:", error);
+    res.status(500).json({ error: "Failed to delete review" });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/reviews/stats
+// ─────────────────────────────────────────────────────────────────────────────
+exports.adminGetReviewStats = async (req, res) => {
+  try {
+    const [overall, distribution, topProducts, recent] = await Promise.all([
+      // Overall numbers
+      db.query(`
+        SELECT
+          COUNT(*)                                          AS total_reviews,
+          COALESCE(AVG(rating)::DECIMAL(3,2), 0)           AS average_rating,
+          COUNT(*) FILTER (WHERE rating = 5)               AS five_star,
+          COUNT(*) FILTER (WHERE rating = 4)               AS four_star,
+          COUNT(*) FILTER (WHERE rating = 3)               AS three_star,
+          COUNT(*) FILTER (WHERE rating <= 2)              AS low_star,
+          COALESCE(SUM(helpful_count), 0)                  AS total_helpful,
+          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')  AS this_week,
+          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days') AS this_month
+        FROM reviews
+      `),
+
+      // Rating distribution
+      db.query(`
+        SELECT rating, COUNT(*) AS count
+        FROM reviews
+        GROUP BY rating
+        ORDER BY rating DESC
+      `),
+
+      // Most reviewed products
+      db.query(`
+        SELECT
+          p.id,
+          p.name,
+          COUNT(r.id)                        AS review_count,
+          AVG(r.rating)::DECIMAL(3,2)        AS avg_rating
+        FROM reviews r
+        JOIN products p ON r.product_id = p.id
+        GROUP BY p.id, p.name
+        ORDER BY review_count DESC
+        LIMIT 5
+      `),
+
+      // Latest 5 reviews
+      db.query(`
+        SELECT
+          r.id, r.rating, r.comment, r.created_at,
+          p.name AS product_name,
+          CASE WHEN r.hide_profile THEN 'Anonymous' ELSE u.full_name END AS user_name
+        FROM reviews r
+        LEFT JOIN users    u ON r.user_id    = u.id
+        LEFT JOIN products p ON r.product_id = p.id
+        ORDER BY r.created_at DESC
+        LIMIT 5
+      `),
+    ]);
+
+    const row = overall.rows[0];
+
+    res.json({
+      success: true,
+      data: {
+        overview: {
+          total_reviews: parseInt(row.total_reviews),
+          average_rating: parseFloat(row.average_rating),
+          five_star: parseInt(row.five_star),
+          four_star: parseInt(row.four_star),
+          three_star: parseInt(row.three_star),
+          low_star: parseInt(row.low_star),
+          total_helpful: parseInt(row.total_helpful),
+          this_week: parseInt(row.this_week),
+          this_month: parseInt(row.this_month),
+        },
+        distribution: distribution.rows.map((r) => ({
+          rating: parseInt(r.rating),
+          count: parseInt(r.count),
+        })),
+        top_products: topProducts.rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          review_count: parseInt(r.review_count),
+          avg_rating: parseFloat(r.avg_rating),
+        })),
+        recent_reviews: recent.rows,
+      },
+    });
+  } catch (error) {
+    console.error("Admin review stats error:", error);
+    res.status(500).json({ error: "Failed to fetch review stats" });
   }
 };
