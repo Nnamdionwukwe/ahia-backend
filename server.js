@@ -216,6 +216,11 @@ const routeFiles = [
     file: "./src/routes/fraud",
     name: "fraud",
   },
+  {
+    path: "/api/admin/adminReviews",
+    file: "./src/routes/adminReviews",
+    name: "adminReviews",
+  },
 ];
 
 routeFiles.forEach(({ path, file, name }) => {
