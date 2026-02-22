@@ -131,7 +131,7 @@ exports.editReview = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DELETE /api/reviews/:reviewId  (user — own reviews only)
+// DELETE /api/reviews/:reviewId
 // ─────────────────────────────────────────────────────────────────────────────
 exports.deleteReview = async (req, res) => {
   try {
@@ -149,7 +149,6 @@ exports.deleteReview = async (req, res) => {
     }
 
     const { product_id } = existing.rows[0];
-
     await db.query("DELETE FROM reviews WHERE id = $1", [reviewId]);
     await updateProductRating(product_id);
     await bustReviewCache(product_id);
@@ -163,34 +162,41 @@ exports.deleteReview = async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/reviews/user/me
+// FIXED: order_items has product_variant_id → join through product_variants
 // ─────────────────────────────────────────────────────────────────────────────
 exports.getUserReviews = async (req, res) => {
   try {
     const userId = req.user.id;
 
+    // Pending: delivered orders whose products haven't been reviewed yet
+    // order_items → product_variants → products (no direct product_id on order_items)
     const pending = await db.query(
-      `SELECT DISTINCT p.id, p.name, p.images, oi.variant_id,
-              pv.name AS variant
+      `SELECT DISTINCT
+         p.id,
+         p.name,
+         p.images,
+         pv.id        AS variant_id,
+         pv.color     AS variant_color,
+         pv.size      AS variant_size
        FROM order_items oi
-       JOIN orders o      ON oi.order_id = o.id
-       JOIN products p    ON oi.product_id = p.id
-       LEFT JOIN product_variants pv ON oi.variant_id = pv.id
+       JOIN orders          o  ON oi.order_id          = o.id
+       JOIN product_variants pv ON oi.product_variant_id = pv.id
+       JOIN products         p  ON pv.product_id         = p.id
        WHERE o.user_id = $1
-         AND o.status IN ('delivered','completed')
+         AND o.status IN ('delivered', 'completed')
          AND NOT EXISTS (
            SELECT 1 FROM reviews r
            WHERE r.product_id = p.id AND r.user_id = $1
          )
-       ORDER BY o.created_at DESC`,
+       ORDER BY p.id`,
       [userId],
     );
 
+    // Reviewed: all reviews this user has written
     const reviewed = await db.query(
-      `SELECT r.*, p.name AS product_name, p.images AS product_images,
-              pv.name AS variant
+      `SELECT r.*, p.name AS product_name, p.images AS product_images
        FROM reviews r
        JOIN products p ON r.product_id = p.id
-       LEFT JOIN product_variants pv ON r.variant_id = pv.id
        WHERE r.user_id = $1
        ORDER BY r.created_at DESC`,
       [userId],
@@ -206,10 +212,12 @@ exports.getUserReviews = async (req, res) => {
       pending: pending.rows.map((row) => ({
         id: row.id,
         name: row.name,
-        variant: row.variant || "",
+        variant:
+          [row.variant_color, row.variant_size].filter(Boolean).join(" / ") ||
+          "",
         image: (() => {
           try {
-            return JSON.parse(row.images || "[]")[0] || "";
+            return (row.images || [])[0] || "";
           } catch {
             return "";
           }
@@ -220,10 +228,13 @@ exports.getUserReviews = async (req, res) => {
         id: row.id,
         productId: row.product_id,
         name: row.product_name,
-        variant: row.variant || "",
+        variant: "",
         image: (() => {
           try {
-            return JSON.parse(row.product_images || "[]")[0] || "";
+            const imgs = Array.isArray(row.product_images)
+              ? row.product_images
+              : JSON.parse(row.product_images || "[]");
+            return imgs[0] || "";
           } catch {
             return "";
           }
@@ -239,7 +250,9 @@ exports.getUserReviews = async (req, res) => {
         hide_profile: row.hide_profile,
         images: (() => {
           try {
-            return JSON.parse(row.images || "[]");
+            return Array.isArray(row.images)
+              ? row.images
+              : JSON.parse(row.images || "[]");
           } catch {
             return [];
           }
@@ -255,30 +268,33 @@ exports.getUserReviews = async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/reviews/user/orders
+// FIXED: same join chain — order_items → product_variants → products
 // ─────────────────────────────────────────────────────────────────────────────
 exports.getUserOrders = async (req, res) => {
   try {
     const userId = req.user.id;
 
     const orders = await db.query(
-      `SELECT o.id, o.created_at, o.delivered_at,
-              json_agg(
-                json_build_object(
-                  'id',      oi.id,
-                  'name',    p.name,
-                  'variant', COALESCE(pv.name, ''),
-                  'image',   (SELECT img FROM jsonb_array_elements_text(p.images::jsonb) img LIMIT 1)
-                )
-                ORDER BY oi.created_at
-              ) AS items
+      `SELECT
+         o.id,
+         o.created_at,
+         json_agg(
+           json_build_object(
+             'id',      oi.id,
+             'name',    p.name,
+             'variant', COALESCE(pv.color || CASE WHEN pv.size IS NOT NULL THEN ' / ' || pv.size ELSE '' END, ''),
+             'image',   (p.images->>0)
+           )
+           ORDER BY oi.created_at
+         ) AS items
        FROM orders o
-       JOIN order_items oi ON oi.order_id = o.id
-       JOIN products p     ON oi.product_id = p.id
-       LEFT JOIN product_variants pv ON oi.variant_id = pv.id
+       JOIN order_items      oi ON oi.order_id           = o.id
+       JOIN product_variants pv ON oi.product_variant_id = pv.id
+       JOIN products         p  ON pv.product_id          = p.id
        WHERE o.user_id = $1
-         AND o.status IN ('delivered','completed')
+         AND o.status IN ('delivered', 'completed')
        GROUP BY o.id
-       ORDER BY COALESCE(o.delivered_at, o.created_at) DESC`,
+       ORDER BY o.created_at DESC`,
       [userId],
     );
 
@@ -286,9 +302,7 @@ exports.getUserOrders = async (req, res) => {
       success: true,
       orders: orders.rows.map((o) => ({
         id: o.id,
-        deliveredDate: new Date(
-          o.delivered_at || o.created_at,
-        ).toLocaleDateString("en-US", {
+        deliveredDate: new Date(o.created_at).toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
           year: "numeric",
@@ -355,7 +369,6 @@ exports.submitAllReviews = async (req, res) => {
             hide_profile || false,
           ],
         );
-
         await updateProductRating(productId);
         await bustReviewCache(productId);
         results.push(inserted.rows[0]);
@@ -401,8 +414,8 @@ exports.getReviews = async (req, res) => {
 
     const reviews = await db.query(
       `SELECT r.*,
-              CASE WHEN r.hide_profile THEN 'Anonymous' ELSE u.full_name END AS full_name,
-              CASE WHEN r.hide_profile THEN NULL ELSE u.profile_image END AS profile_image
+              CASE WHEN r.hide_profile THEN 'Anonymous' ELSE u.full_name    END AS full_name,
+              CASE WHEN r.hide_profile THEN NULL         ELSE u.profile_image END AS profile_image
        FROM reviews r
        LEFT JOIN users u ON r.user_id = u.id
        WHERE r.product_id = $1
@@ -527,10 +540,6 @@ exports.markHelpful = async (req, res) => {
 // ADMIN CONTROLLERS
 // =============================================================================
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/admin/reviews
-// Query: page, limit, rating, sort, search, product_id
-// ─────────────────────────────────────────────────────────────────────────────
 exports.adminGetAllReviews = async (req, res) => {
   try {
     const {
@@ -541,7 +550,6 @@ exports.adminGetAllReviews = async (req, res) => {
       search,
       product_id,
     } = req.query;
-
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const params = [];
     const where = [];
@@ -550,12 +558,10 @@ exports.adminGetAllReviews = async (req, res) => {
       params.push(parseInt(rating));
       where.push(`r.rating = $${params.length}`);
     }
-
     if (product_id) {
       params.push(product_id);
       where.push(`r.product_id = $${params.length}`);
     }
-
     if (search) {
       params.push(`%${search}%`);
       where.push(
@@ -564,7 +570,6 @@ exports.adminGetAllReviews = async (req, res) => {
     }
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
-
     const orderMap = {
       recent: "r.created_at DESC",
       oldest: "r.created_at ASC",
@@ -574,7 +579,6 @@ exports.adminGetAllReviews = async (req, res) => {
     };
     const orderBy = orderMap[sort] || orderMap.recent;
 
-    // Count
     const countResult = await db.query(
       `SELECT COUNT(*) AS total
        FROM reviews r
@@ -584,23 +588,15 @@ exports.adminGetAllReviews = async (req, res) => {
       params,
     );
 
-    // Rows
     const dataParams = [...params, parseInt(limit), offset];
     const reviews = await db.query(
       `SELECT
-         r.id,
-         r.rating,
-         r.comment,
-         r.images,
-         r.helpful_count,
-         r.hide_profile,
-         r.created_at,
-         r.updated_at,
-         r.product_id,
-         p.name   AS product_name,
+         r.id, r.rating, r.comment, r.images, r.helpful_count,
+         r.hide_profile, r.created_at, r.updated_at, r.product_id,
+         p.name AS product_name,
          r.user_id,
-         CASE WHEN r.hide_profile THEN 'Anonymous' ELSE u.full_name   END AS user_name,
-         CASE WHEN r.hide_profile THEN NULL         ELSE u.email       END AS user_email,
+         CASE WHEN r.hide_profile THEN 'Anonymous' ELSE u.full_name    END AS user_name,
+         CASE WHEN r.hide_profile THEN NULL         ELSE u.email        END AS user_email,
          CASE WHEN r.hide_profile THEN NULL         ELSE u.profile_image END AS user_avatar
        FROM reviews r
        LEFT JOIN users    u ON r.user_id    = u.id
@@ -620,7 +616,9 @@ exports.adminGetAllReviews = async (req, res) => {
           ...r,
           images: (() => {
             try {
-              return JSON.parse(r.images || "[]");
+              return Array.isArray(r.images)
+                ? r.images
+                : JSON.parse(r.images || "[]");
             } catch {
               return [];
             }
@@ -640,22 +638,16 @@ exports.adminGetAllReviews = async (req, res) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DELETE /api/admin/reviews/:reviewId  (admin — any review)
-// ─────────────────────────────────────────────────────────────────────────────
 exports.adminDeleteReview = async (req, res) => {
   try {
     const { reviewId } = req.params;
-
     const existing = await db.query("SELECT * FROM reviews WHERE id = $1", [
       reviewId,
     ]);
-    if (!existing.rows.length) {
+    if (!existing.rows.length)
       return res.status(404).json({ error: "Review not found" });
-    }
 
     const { product_id } = existing.rows[0];
-
     await db.query("DELETE FROM reviews WHERE id = $1", [reviewId]);
     await updateProductRating(product_id);
     await bustReviewCache(product_id);
@@ -667,55 +659,41 @@ exports.adminDeleteReview = async (req, res) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/admin/reviews/stats
-// ─────────────────────────────────────────────────────────────────────────────
 exports.adminGetReviewStats = async (req, res) => {
   try {
     const [overall, distribution, topProducts, recent] = await Promise.all([
-      // Overall numbers
       db.query(`
         SELECT
-          COUNT(*)                                          AS total_reviews,
-          COALESCE(AVG(rating)::DECIMAL(3,2), 0)           AS average_rating,
-          COUNT(*) FILTER (WHERE rating = 5)               AS five_star,
-          COUNT(*) FILTER (WHERE rating = 4)               AS four_star,
-          COUNT(*) FILTER (WHERE rating = 3)               AS three_star,
-          COUNT(*) FILTER (WHERE rating <= 2)              AS low_star,
-          COALESCE(SUM(helpful_count), 0)                  AS total_helpful,
-          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')  AS this_week,
-          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days') AS this_month
+          COUNT(*)                                                              AS total_reviews,
+          COALESCE(AVG(rating)::DECIMAL(3,2), 0)                               AS average_rating,
+          COUNT(*) FILTER (WHERE rating = 5)                                   AS five_star,
+          COUNT(*) FILTER (WHERE rating = 4)                                   AS four_star,
+          COUNT(*) FILTER (WHERE rating = 3)                                   AS three_star,
+          COUNT(*) FILTER (WHERE rating <= 2)                                  AS low_star,
+          COALESCE(SUM(helpful_count), 0)                                      AS total_helpful,
+          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')      AS this_week,
+          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')     AS this_month
         FROM reviews
       `),
-
-      // Rating distribution
       db.query(`
         SELECT rating, COUNT(*) AS count
         FROM reviews
-        GROUP BY rating
-        ORDER BY rating DESC
+        GROUP BY rating ORDER BY rating DESC
       `),
-
-      // Most reviewed products
       db.query(`
-        SELECT
-          p.id,
-          p.name,
-          COUNT(r.id)                        AS review_count,
-          AVG(r.rating)::DECIMAL(3,2)        AS avg_rating
+        SELECT p.id, p.name,
+               COUNT(r.id)                 AS review_count,
+               AVG(r.rating)::DECIMAL(3,2) AS avg_rating
         FROM reviews r
         JOIN products p ON r.product_id = p.id
         GROUP BY p.id, p.name
         ORDER BY review_count DESC
         LIMIT 5
       `),
-
-      // Latest 5 reviews
       db.query(`
-        SELECT
-          r.id, r.rating, r.comment, r.created_at,
-          p.name AS product_name,
-          CASE WHEN r.hide_profile THEN 'Anonymous' ELSE u.full_name END AS user_name
+        SELECT r.id, r.rating, r.comment, r.created_at,
+               p.name AS product_name,
+               CASE WHEN r.hide_profile THEN 'Anonymous' ELSE u.full_name END AS user_name
         FROM reviews r
         LEFT JOIN users    u ON r.user_id    = u.id
         LEFT JOIN products p ON r.product_id = p.id
@@ -725,7 +703,6 @@ exports.adminGetReviewStats = async (req, res) => {
     ]);
 
     const row = overall.rows[0];
-
     res.json({
       success: true,
       data: {
