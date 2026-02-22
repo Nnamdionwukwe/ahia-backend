@@ -1,5 +1,5 @@
 // src/routes/adminReviews.js
-// Mounted in server.js as: app.use("/api/admin/reviews", adminReviewsRouter)
+// Mounted in server.js as: app.use("/api/admin/adminReviews", adminReviewsRouter)
 
 const express = require("express");
 const router = express.Router();
