@@ -114,7 +114,9 @@ exports.editReview = async (req, res) => {
       [
         rating ?? current.rating,
         comment ?? current.comment,
-        JSON.stringify(images ?? JSON.parse(current.images || "[]")),
+        JSON.stringify(
+          images ?? (Array.isArray(current.images) ? current.images : []),
+        ),
         hide_profile ?? current.hide_profile,
         reviewId,
       ],
