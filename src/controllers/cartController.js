@@ -18,7 +18,7 @@ const cartController = {
           c.quantity,
           c.is_selected,
           c.created_at,
-          c.selected_image_url,  -- ✅ User's manually selected image
+          c.selected_image_url,
           p.name,
           p.price,
           p.original_price,
@@ -65,23 +65,14 @@ const cartController = {
 
       const { rows } = await pool.query(cartQuery, [userId]);
 
-      // ✅ FIXED: Strict priority - NEVER overwrite selected_image_url
       const processedRows = rows.map((item) => {
         let imageUrl = null;
         let variantImageUrl = null;
 
-        // ✅ PRIORITY 1: If user selected an image, USE IT (don't override!)
         if (item.selected_image_url) {
           imageUrl = item.selected_image_url;
           variantImageUrl = item.selected_image_url;
-
-          console.log(
-            `✅ Using selected image for cart item ${item.id}:`,
-            item.selected_image_url,
-          );
-        }
-        // PRIORITY 2: If no selected image, map variant color to image array
-        else if (
+        } else if (
           item.color &&
           item.images &&
           Array.isArray(item.images) &&
@@ -94,83 +85,49 @@ const cartController = {
             ...new Set(productItems.map((r) => r.color).filter(Boolean)),
           ];
           const colorIndex = uniqueColors.indexOf(item.color);
-
-          if (colorIndex !== -1) {
-            variantImageUrl = item.images[colorIndex % item.images.length];
-            imageUrl = variantImageUrl;
-            console.log(
-              `🎨 Using color-mapped image for cart item ${item.id}:`,
-              imageUrl,
-            );
-          } else {
-            imageUrl = item.images[0];
-            console.log(
-              `📦 Using first image for cart item ${item.id}:`,
-              imageUrl,
-            );
-          }
-        }
-        // PRIORITY 3: Use first product image
-        else if (
+          variantImageUrl =
+            colorIndex !== -1
+              ? item.images[colorIndex % item.images.length]
+              : item.images[0];
+          imageUrl = variantImageUrl;
+        } else if (
           item.images &&
           Array.isArray(item.images) &&
           item.images.length > 0
         ) {
           imageUrl = item.images[0];
-          console.log(
-            `📷 Using fallback image for cart item ${item.id}:`,
-            imageUrl,
-          );
         }
 
-        // ✅ CRITICAL: Return the item with image_url and variant_image_url
-        // but DON'T include selected_image_url in the response to avoid confusion
         return {
           ...item,
-          image_url: imageUrl, // Final image to display
+          image_url: imageUrl,
           variant_image_url: variantImageUrl,
-          // selected_image_url is already in the item from database
         };
       });
 
-      // Check for active sales on cart items
       const itemsWithSales = await Promise.all(
         processedRows.map(async (item) => {
-          // Check for flash sale
           const flashSaleQuery = `
             SELECT fs.*, fsp.sale_price
             FROM flash_sales fs
             JOIN flash_sale_products fsp ON fs.id = fsp.flash_sale_id
             WHERE fsp.product_id = $1
-            AND fs.start_time <= NOW()
-            AND fs.end_time > NOW()
-            AND fs.status = 'active'
-            ORDER BY fsp.sale_price ASC
-            LIMIT 1
+            AND fs.start_time <= NOW() AND fs.end_time > NOW() AND fs.status = 'active'
+            ORDER BY fsp.sale_price ASC LIMIT 1
           `;
-          const flashSaleResult = await pool.query(flashSaleQuery, [
-            item.product_id,
-          ]);
-
-          // Check for seasonal sale
           const seasonalSaleQuery = `
             SELECT ss.*, ssp.sale_price
             FROM seasonal_sales ss
             JOIN seasonal_sale_products ssp ON ss.id = ssp.seasonal_sale_id
             WHERE ssp.product_id = $1
-            AND ss.start_time <= NOW()
-            AND ss.end_time > NOW()
-            AND ss.is_active = true
-            ORDER BY ssp.sale_price ASC
-            LIMIT 1
+            AND ss.start_time <= NOW() AND ss.end_time > NOW() AND ss.is_active = true
+            ORDER BY ssp.sale_price ASC LIMIT 1
           `;
-          const seasonalSaleResult = await pool.query(seasonalSaleQuery, [
-            item.product_id,
+          const [flashResult, seasonalResult] = await Promise.all([
+            pool.query(flashSaleQuery, [item.product_id]),
+            pool.query(seasonalSaleQuery, [item.product_id]),
           ]);
-
-          const activeSale =
-            flashSaleResult.rows[0] || seasonalSaleResult.rows[0];
-
+          const activeSale = flashResult.rows[0] || seasonalResult.rows[0];
           if (activeSale) {
             const salePrice = activeSale.sale_price;
             const saleDiscount = Math.round(
@@ -178,7 +135,6 @@ const cartController = {
                 item.item_original_price) *
                 100,
             );
-
             return {
               ...item,
               sale: activeSale,
@@ -188,7 +144,6 @@ const cartController = {
               sale_end_time: activeSale.end_time,
             };
           }
-
           return item;
         }),
       );
@@ -200,7 +155,7 @@ const cartController = {
     }
   },
 
-  // Add item to cart - ✅ WITH LOGGING
+  // Add item to cart
   addToCart: async (req, res) => {
     try {
       const userId = req.user.id;
@@ -218,84 +173,68 @@ const cartController = {
         selected_image_url,
       });
 
-      // Check if item already exists in cart
+      // ── product_variant_id is NOT NULL in DB — always required ──────────
+      if (!product_variant_id) {
+        return res
+          .status(400)
+          .json({ error: "product_variant_id is required" });
+      }
+
+      // ── If product_id not provided, look it up from the variant ─────────
+      let resolvedProductId = product_id || null;
+      if (!resolvedProductId) {
+        const variantLookup = await pool.query(
+          `SELECT product_id FROM product_variants WHERE id = $1`,
+          [product_variant_id],
+        );
+        if (!variantLookup.rows.length) {
+          return res.status(404).json({ error: "Variant not found" });
+        }
+        resolvedProductId = variantLookup.rows[0].product_id;
+        console.log(
+          `🔍 Resolved product_id ${resolvedProductId} from variant ${product_variant_id}`,
+        );
+      }
+
+      // ── Check if item already in cart ────────────────────────────────────
       const existingQuery = `
         SELECT * FROM ${CART_TABLE}
-        WHERE user_id = $1 
-        AND product_id = $2 
-        AND ($3::uuid IS NULL AND product_variant_id IS NULL OR product_variant_id = $3)
+        WHERE user_id = $1 AND product_id = $2 AND product_variant_id = $3
       `;
       const existing = await pool.query(existingQuery, [
         userId,
-        product_id,
-        product_variant_id || null,
+        resolvedProductId,
+        product_variant_id,
       ]);
 
       if (existing.rows.length > 0) {
-        // Update quantity and ALWAYS update selected image if provided
         const updateQuery = selected_image_url
-          ? `
-            UPDATE ${CART_TABLE}
-            SET quantity = quantity + $1, 
-                selected_image_url = $4,
-                updated_at = NOW()
-            WHERE id = $2 AND user_id = $3
-            RETURNING *
-          `
-          : `
-            UPDATE ${CART_TABLE}
-            SET quantity = quantity + $1, updated_at = NOW()
-            WHERE id = $2 AND user_id = $3
-            RETURNING *
-          `;
-
+          ? `UPDATE ${CART_TABLE} SET quantity = quantity + $1, selected_image_url = $4, updated_at = NOW() WHERE id = $2 AND user_id = $3 RETURNING *`
+          : `UPDATE ${CART_TABLE} SET quantity = quantity + $1, updated_at = NOW() WHERE id = $2 AND user_id = $3 RETURNING *`;
         const params = selected_image_url
           ? [quantity, existing.rows[0].id, userId, selected_image_url]
           : [quantity, existing.rows[0].id, userId];
-
         const result = await pool.query(updateQuery, params);
-
-        console.log(
-          "✅ Cart updated with selected image:",
-          result.rows[0].selected_image_url,
-        );
-
-        res.json({ message: "Cart updated", item: result.rows[0] });
-      } else {
-        // Insert new item with selected image
-        const insertQuery = selected_image_url
-          ? `
-            INSERT INTO ${CART_TABLE} 
-            (user_id, product_id, product_variant_id, quantity, is_selected, selected_image_url)
-            VALUES ($1, $2, $3, $4, true, $5)
-            RETURNING *
-          `
-          : `
-            INSERT INTO ${CART_TABLE} 
-            (user_id, product_id, product_variant_id, quantity, is_selected)
-            VALUES ($1, $2, $3, $4, true)
-            RETURNING *
-          `;
-
-        const params = selected_image_url
-          ? [
-              userId,
-              product_id,
-              product_variant_id || null,
-              quantity,
-              selected_image_url,
-            ]
-          : [userId, product_id, product_variant_id || null, quantity];
-
-        const result = await pool.query(insertQuery, params);
-
-        console.log(
-          "✅ New cart item created with selected image:",
-          result.rows[0].selected_image_url,
-        );
-
-        res.json({ message: "Item added to cart", item: result.rows[0] });
+        console.log("✅ Cart updated:", result.rows[0].id);
+        return res.json({ message: "Cart updated", item: result.rows[0] });
       }
+
+      // ── Insert new cart item ─────────────────────────────────────────────
+      const insertQuery = selected_image_url
+        ? `INSERT INTO ${CART_TABLE} (user_id, product_id, product_variant_id, quantity, is_selected, selected_image_url) VALUES ($1, $2, $3, $4, true, $5) RETURNING *`
+        : `INSERT INTO ${CART_TABLE} (user_id, product_id, product_variant_id, quantity, is_selected) VALUES ($1, $2, $3, $4, true) RETURNING *`;
+      const params = selected_image_url
+        ? [
+            userId,
+            resolvedProductId,
+            product_variant_id,
+            quantity,
+            selected_image_url,
+          ]
+        : [userId, resolvedProductId, product_variant_id, quantity];
+      const result = await pool.query(insertQuery, params);
+      console.log("✅ New cart item created:", result.rows[0].id);
+      return res.json({ message: "Item added to cart", item: result.rows[0] });
     } catch (error) {
       console.error("Error adding to cart:", error);
       res.status(500).json({ error: "Failed to add to cart" });
@@ -310,19 +249,17 @@ const cartController = {
       const { quantity } = req.body;
 
       if (quantity <= 0) {
-        const deleteQuery = `DELETE FROM ${CART_TABLE} WHERE id = $1 AND user_id = $2`;
-        await pool.query(deleteQuery, [id, userId]);
-        res.json({ message: "Item removed from cart" });
-      } else {
-        const updateQuery = `
-          UPDATE ${CART_TABLE}
-          SET quantity = $1, updated_at = NOW()
-          WHERE id = $2 AND user_id = $3
-          RETURNING *
-        `;
-        const result = await pool.query(updateQuery, [quantity, id, userId]);
-        res.json({ message: "Quantity updated", item: result.rows[0] });
+        await pool.query(
+          `DELETE FROM ${CART_TABLE} WHERE id = $1 AND user_id = $2`,
+          [id, userId],
+        );
+        return res.json({ message: "Item removed from cart" });
       }
+      const result = await pool.query(
+        `UPDATE ${CART_TABLE} SET quantity = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3 RETURNING *`,
+        [quantity, id, userId],
+      );
+      res.json({ message: "Quantity updated", item: result.rows[0] });
     } catch (error) {
       console.error("Error updating quantity:", error);
       res.status(500).json({ error: "Failed to update quantity" });
@@ -335,14 +272,10 @@ const cartController = {
       const userId = req.user.id;
       const { id } = req.params;
       const { is_selected } = req.body;
-
-      const updateQuery = `
-        UPDATE ${CART_TABLE}
-        SET is_selected = $1, updated_at = NOW()
-        WHERE id = $2 AND user_id = $3
-        RETURNING *
-      `;
-      const result = await pool.query(updateQuery, [is_selected, id, userId]);
+      const result = await pool.query(
+        `UPDATE ${CART_TABLE} SET is_selected = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3 RETURNING *`,
+        [is_selected, id, userId],
+      );
       res.json({ item: result.rows[0] });
     } catch (error) {
       console.error("Error toggling selection:", error);
@@ -355,14 +288,10 @@ const cartController = {
     try {
       const userId = req.user.id;
       const { is_selected } = req.body;
-
-      const updateQuery = `
-        UPDATE ${CART_TABLE}
-        SET is_selected = $1, updated_at = NOW()
-        WHERE user_id = $2
-        RETURNING *
-      `;
-      const result = await pool.query(updateQuery, [is_selected, userId]);
+      const result = await pool.query(
+        `UPDATE ${CART_TABLE} SET is_selected = $1, updated_at = NOW() WHERE user_id = $2 RETURNING *`,
+        [is_selected, userId],
+      );
       res.json({ message: "All items updated", items: result.rows });
     } catch (error) {
       console.error("Error toggling select all:", error);
@@ -375,9 +304,10 @@ const cartController = {
     try {
       const userId = req.user.id;
       const { id } = req.params;
-
-      const deleteQuery = `DELETE FROM ${CART_TABLE} WHERE id = $1 AND user_id = $2`;
-      await pool.query(deleteQuery, [id, userId]);
+      await pool.query(
+        `DELETE FROM ${CART_TABLE} WHERE id = $1 AND user_id = $2`,
+        [id, userId],
+      );
       res.json({ message: "Item removed from cart" });
     } catch (error) {
       console.error("Error removing item:", error);
@@ -389,9 +319,10 @@ const cartController = {
   removeSelected: async (req, res) => {
     try {
       const userId = req.user.id;
-
-      const deleteQuery = `DELETE FROM ${CART_TABLE} WHERE user_id = $1 AND is_selected = true`;
-      await pool.query(deleteQuery, [userId]);
+      await pool.query(
+        `DELETE FROM ${CART_TABLE} WHERE user_id = $1 AND is_selected = true`,
+        [userId],
+      );
       res.json({ message: "Selected items removed" });
     } catch (error) {
       console.error("Error removing selected items:", error);
@@ -403,17 +334,10 @@ const cartController = {
   getCartSummary: async (req, res) => {
     try {
       const userId = req.user.id;
-
-      const summaryQuery = `
-        SELECT 
-          COUNT(*) as total_items,
-          COUNT(CASE WHEN is_selected = true THEN 1 END) as selected_items,
-          SUM(CASE WHEN is_selected = true THEN quantity ELSE 0 END) as selected_quantity
-        FROM ${CART_TABLE}
-        WHERE user_id = $1
-      `;
-
-      const { rows } = await pool.query(summaryQuery, [userId]);
+      const { rows } = await pool.query(
+        `SELECT COUNT(*) as total_items, COUNT(CASE WHEN is_selected = true THEN 1 END) as selected_items, SUM(CASE WHEN is_selected = true THEN quantity ELSE 0 END) as selected_quantity FROM ${CART_TABLE} WHERE user_id = $1`,
+        [userId],
+      );
       res.json(rows[0]);
     } catch (error) {
       console.error("Error fetching cart summary:", error);
