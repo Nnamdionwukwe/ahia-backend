@@ -4,11 +4,7 @@ const router = express.Router();
 const adminController = require("../controllers/adminController");
 const flashSalesController = require("../controllers/flashSalesController");
 const seasonalSalesController = require("../controllers/seasonalSalesController");
-const {
-  authenticateToken,
-  requireAdmin,
-  requireRole,
-} = require("../middleware/auth");
+const { authenticateToken, requireAdmin } = require("../middleware/auth");
 
 // ========================================================
 // USERS MANAGEMENT
@@ -94,10 +90,18 @@ router.put(
 );
 
 // ========================================================
+// PAYMENTS MANAGEMENT
+// ========================================================
+router.get(
+  "/payments",
+  authenticateToken,
+  requireAdmin,
+  adminController.getAllPayments,
+);
+
+// ========================================================
 // FLASH SALES MANAGEMENT
 // ========================================================
-
-// Get all flash sales (with filters)
 router.get(
   "/flash-sales",
   authenticateToken,
@@ -105,7 +109,6 @@ router.get(
   flashSalesController.getAllFlashSales,
 );
 
-// Get specific flash sale details
 router.get(
   "/flash-sales/:flashSaleId",
   authenticateToken,
@@ -113,7 +116,6 @@ router.get(
   flashSalesController.getFlashSaleById,
 );
 
-// Get flash sale products
 router.get(
   "/flash-sales/:flashSaleId/products",
   authenticateToken,
@@ -121,7 +123,6 @@ router.get(
   flashSalesController.getFlashSaleProducts,
 );
 
-// Get flash sale analytics
 router.get(
   "/flash-sales/:flashSaleId/analytics",
   authenticateToken,
@@ -129,7 +130,6 @@ router.get(
   flashSalesController.getFlashSaleAnalytics,
 );
 
-// Create new flash sale
 router.post(
   "/flash-sales",
   authenticateToken,
@@ -137,7 +137,6 @@ router.post(
   flashSalesController.createFlashSale,
 );
 
-// Update flash sale status
 router.put(
   "/flash-sales/:flashSaleId/status",
   authenticateToken,
@@ -145,7 +144,6 @@ router.put(
   flashSalesController.updateFlashSaleStatus,
 );
 
-// Delete flash sale
 router.delete(
   "/flash-sales/:flashSaleId",
   authenticateToken,
@@ -156,8 +154,6 @@ router.delete(
 // ========================================================
 // SEASONAL SALES MANAGEMENT
 // ========================================================
-
-// Get all seasonal sales (with filters)
 router.get(
   "/seasonal-sales",
   authenticateToken,
@@ -165,7 +161,6 @@ router.get(
   seasonalSalesController.getAllSeasonalSales,
 );
 
-// Get specific seasonal sale details
 router.get(
   "/seasonal-sales/:saleId",
   authenticateToken,
@@ -173,7 +168,6 @@ router.get(
   seasonalSalesController.getSeasonalSaleById,
 );
 
-// Get seasonal sale products
 router.get(
   "/seasonal-sales/:saleId/products",
   authenticateToken,
@@ -181,7 +175,6 @@ router.get(
   seasonalSalesController.getSeasonalSaleProducts,
 );
 
-// Create new seasonal sale
 router.post(
   "/seasonal-sales",
   authenticateToken,
@@ -189,7 +182,6 @@ router.post(
   seasonalSalesController.createSeasonalSale,
 );
 
-// Update seasonal sale status
 router.patch(
   "/seasonal-sales/:saleId/status",
   authenticateToken,
@@ -197,7 +189,6 @@ router.patch(
   seasonalSalesController.updateSeasonalSaleStatus,
 );
 
-// Delete seasonal sale
 router.delete(
   "/seasonal-sales/:saleId",
   authenticateToken,
@@ -215,14 +206,9 @@ router.get(
   adminController.getPlatformAnalytics,
 );
 
-// Add to your adminRoutes.js file
-
-/**
- * @route   POST /api/admin/notifications/bulk
- * @desc    Send bulk notification to users
- * @access  Admin only
- * @body    { type, title, message, priority, targetAudience }
- */
+// ========================================================
+// NOTIFICATIONS
+// ========================================================
 router.post(
   "/notifications/bulk",
   authenticateToken,
@@ -246,7 +232,6 @@ router.post(
       const db = require("../config/database");
       const notificationsController = require("../controllers/notificationsController");
 
-      // Build user query based on target audience
       let userQuery = "SELECT id FROM users WHERE 1=1";
       const params = [];
 
@@ -257,7 +242,6 @@ router.post(
       } else if (targetAudience === "unverified") {
         userQuery += " AND is_verified = false";
       }
-      // "all" gets everyone
 
       const users = await db.query(userQuery, params);
       const userIds = users.rows.map((u) => u.id);
@@ -270,7 +254,6 @@ router.post(
         });
       }
 
-      // Send bulk notification
       await notificationsController.sendBulkNotification(
         userIds,
         type,
@@ -292,11 +275,6 @@ router.post(
   },
 );
 
-/**
- * @route   GET /api/admin/notifications/stats
- * @desc    Get notification statistics
- * @access  Admin only
- */
 router.get(
   "/notifications/stats",
   authenticateToken,
@@ -306,19 +284,19 @@ router.get(
       const db = require("../config/database");
 
       const stats = await db.query(`
-      SELECT 
-        COUNT(*) as total_sent,
-        COUNT(CASE WHEN is_read = true THEN 1 END) as opened,
-        COUNT(CASE WHEN priority = 'high' THEN 1 END) as high_priority
-      FROM notifications
-      WHERE created_at > NOW() - INTERVAL '30 days'
-    `);
+        SELECT
+          COUNT(*) as total_sent,
+          COUNT(CASE WHEN is_read = true THEN 1 END) as opened,
+          COUNT(CASE WHEN priority = 'high' THEN 1 END) as high_priority
+        FROM notifications
+        WHERE created_at > NOW() - INTERVAL '30 days'
+      `);
 
       res.json({
         totalSent: parseInt(stats.rows[0].total_sent),
-        delivered: parseInt(stats.rows[0].total_sent), // Assume all delivered
+        delivered: parseInt(stats.rows[0].total_sent),
         opened: parseInt(stats.rows[0].opened),
-        clicked: 0, // TODO: Implement click tracking
+        clicked: 0,
         highPriority: parseInt(stats.rows[0].high_priority),
       });
     } catch (error) {
@@ -326,13 +304,6 @@ router.get(
       res.status(500).json({ error: "Failed to fetch notification stats" });
     }
   },
-);
-
-router.get(
-  "/payments",
-  authenticateUser,
-  requireRole("admin"),
-  adminCtrl.getAllPayments,
 );
 
 module.exports = router;
