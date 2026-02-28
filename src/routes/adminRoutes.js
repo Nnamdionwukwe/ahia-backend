@@ -90,6 +90,16 @@ router.put(
   adminController.updateOrderStatus,
 );
 
+// DELETE /api/admin/orders/clear
+// Body: { status: "pending" | "cancelled" | "all" }
+// Requires explicit status — refuses to run without one for safety.
+router.delete(
+  "/orders/clear",
+  authenticateToken,
+  requireAdmin,
+  adminController.clearAllOrders,
+);
+
 // ========================================================
 // PAYMENTS MANAGEMENT
 // ========================================================

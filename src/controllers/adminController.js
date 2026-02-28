@@ -736,6 +736,167 @@ const adminController = {
       });
     }
   },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ADD THIS to adminController.js  — inside the adminController object,
+  // after the updateOrderStatus method (before the closing `};`)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Clear / bulk-delete orders  (Admin only)
+   * DELETE /api/admin/orders/clear
+   *
+   * Body params:
+   *   status       {string}  Required. "pending" | "cancelled" | "failed" |
+   *                          "processing" | "shipped" | "delivered" | "all"
+   *                          Pass "all" to delete every order in the table.
+   *   olderThanDays {number} Optional. Only delete orders older than N days.
+   *   dryRun        {bool}   Optional. If true, returns count without deleting.
+   *
+   * Safety rules:
+   *  - Refuses to run if `status` is missing (prevents accidental full wipe)
+   *  - Never deletes orders with payment_status = 'paid' unless status = "all"
+   *    AND confirmPaid = true is explicitly sent
+   *  - Returns count of affected rows before and after deletion
+   */
+  clearAllOrders: async (req, res) => {
+    const client = await db.pool.connect();
+    try {
+      const {
+        status,
+        olderThanDays,
+        dryRun = false,
+        confirmPaid = false,
+      } = req.body;
+
+      // ── Safety gate ───────────────────────────────────────────────────────
+      if (!status) {
+        return res.status(400).json({
+          success: false,
+          message:
+            'status is required. Pass a specific status or "all" to clear everything.',
+          allowedValues: [
+            "pending",
+            "processing",
+            "shipped",
+            "delivered",
+            "cancelled",
+            "failed",
+            "all",
+          ],
+        });
+      }
+
+      // Build WHERE clause
+      const conditions = [];
+      const params = [];
+      let p = 1;
+
+      // Status filter
+      if (status !== "all") {
+        const validStatuses = [
+          "pending",
+          "processing",
+          "shipped",
+          "delivered",
+          "cancelled",
+          "failed",
+        ];
+        if (!validStatuses.includes(status)) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid status "${status}". Allowed: ${validStatuses.join(", ")}, all`,
+          });
+        }
+        conditions.push(`status = $${p++}`);
+        params.push(status);
+      }
+
+      // Age filter
+      if (olderThanDays) {
+        const days = parseInt(olderThanDays);
+        if (isNaN(days) || days < 1) {
+          return res.status(400).json({
+            success: false,
+            message: "olderThanDays must be a positive integer",
+          });
+        }
+        conditions.push(`created_at < NOW() - INTERVAL '${days} days'`);
+      }
+
+      // Protect paid orders unless explicitly confirmed
+      if (!confirmPaid) {
+        conditions.push(`payment_status != 'paid'`);
+      }
+
+      const whereClause =
+        conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      // ── Dry run — just count ───────────────────────────────────────────────
+      const countResult = await db.query(
+        `SELECT COUNT(*) as count FROM orders ${whereClause}`,
+        params,
+      );
+      const affectedCount = parseInt(countResult.rows[0].count);
+
+      if (dryRun) {
+        return res.json({
+          success: true,
+          dryRun: true,
+          wouldDelete: affectedCount,
+          filters: { status, olderThanDays, confirmPaid },
+          message: `Dry run: ${affectedCount} order(s) would be deleted.`,
+        });
+      }
+
+      if (affectedCount === 0) {
+        return res.json({
+          success: true,
+          deletedCount: 0,
+          message: "No orders matched the given filters. Nothing was deleted.",
+        });
+      }
+
+      // ── Actual deletion inside a transaction ──────────────────────────────
+      await client.query("BEGIN");
+
+      // Delete related order_items first (in case no CASCADE is set)
+      await client.query(
+        `DELETE FROM order_items
+         WHERE order_id IN (
+           SELECT id FROM orders ${whereClause}
+         )`,
+        params,
+      );
+
+      // Delete the orders themselves
+      const deleteResult = await client.query(
+        `DELETE FROM orders ${whereClause} RETURNING id`,
+        params,
+      );
+
+      await client.query("COMMIT");
+
+      const deletedCount = deleteResult.rows.length;
+
+      return res.json({
+        success: true,
+        deletedCount,
+        filters: { status, olderThanDays, confirmPaid },
+        message: `Successfully deleted ${deletedCount} order(s).`,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      console.error("clearAllOrders error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to clear orders",
+        error: error.message,
+      });
+    } finally {
+      client.release();
+    }
+  },
 };
 
 module.exports = adminController;
