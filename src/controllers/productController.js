@@ -85,7 +85,7 @@ exports.getAllProducts = async (req, res) => {
     console.log(
       `✅ Returned ${result.rows.length} products ${
         isShuffled ? "(shuffled)" : ""
-      }`
+      }`,
     );
 
     // ✅ Return with shuffle information
@@ -233,7 +233,7 @@ exports.getProductById = async (req, res) => {
        FROM products p
        LEFT JOIN sellers s ON p.seller_id = s.id
        WHERE p.id = $1`,
-      [id]
+      [id],
     );
 
     if (product.rows.length === 0) {
@@ -245,7 +245,7 @@ exports.getProductById = async (req, res) => {
       `SELECT id, color, size, base_price, discount_percentage, stock_quantity
        FROM product_variants
        WHERE product_id = $1`,
-      [id]
+      [id],
     );
 
     const productData = {
@@ -274,7 +274,7 @@ exports.getProductVariants = async (req, res) => {
        FROM product_variants
        WHERE product_id = $1 AND stock_quantity >= 0
        ORDER BY color, size`,
-      [productId]
+      [productId],
     );
 
     res.json({
@@ -300,7 +300,7 @@ exports.getProductsByCategory = async (req, res) => {
        WHERE p.category = $1
        ORDER BY p.created_at DESC
        LIMIT $2 OFFSET $3`,
-      [category, limit, offset]
+      [category, limit, offset],
     );
 
     res.json({
@@ -360,7 +360,7 @@ exports.createProduct = async (req, res) => {
        (name, description, price, category, images, stock_quantity, seller_id, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
        RETURNING *`,
-      [name, description, price, category, images, stock_quantity, seller_id]
+      [name, description, price, category, images, stock_quantity, seller_id],
     );
 
     res.status(201).json({
@@ -390,7 +390,7 @@ exports.updateProduct = async (req, res) => {
        SET ${fields}, updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      values
+      values,
     );
 
     if (product.rows.length === 0) {
@@ -417,7 +417,7 @@ exports.deleteProduct = async (req, res) => {
 
     const result = await db.query(
       "DELETE FROM products WHERE id = $1 RETURNING *",
-      [id]
+      [id],
     );
 
     if (result.rows.length === 0) {
@@ -605,7 +605,7 @@ exports.getProductDetails = async (req, res) => {
        FROM products p
        LEFT JOIN sellers s ON p.seller_id = s.id
        WHERE p.id = $1`,
-      [id]
+      [id],
     );
 
     if (product.rows.length === 0) {
@@ -643,7 +643,7 @@ exports.getProductDetails = async (req, res) => {
           THEN CAST(size AS DECIMAL)
           ELSE 999
         END`,
-      [id, productData.price]
+      [id, productData.price],
     );
 
     // Map product images to variants based on color matching
@@ -666,7 +666,7 @@ exports.getProductDetails = async (req, res) => {
        FROM product_attributes
        WHERE product_id = $1
        ORDER BY attribute_group, display_order`,
-      [id]
+      [id],
     );
 
     // Group attributes by category
@@ -901,7 +901,7 @@ exports.trackView = async (req, res) => {
 
     const product = await db.query(
       "SELECT category FROM products WHERE id = $1",
-      [id]
+      [id],
     );
 
     if (product.rows.length > 0) {
@@ -910,7 +910,7 @@ exports.trackView = async (req, res) => {
         `user_view:${userId}:${id}`,
         product.rows[0].category,
         "EX",
-        86400
+        86400,
       );
     }
 
@@ -934,7 +934,7 @@ exports.getProductVariants = async (req, res) => {
        FROM product_variants
        WHERE product_id = $1 AND stock_quantity >= 0
        ORDER BY color, size`,
-      [productId]
+      [productId],
     );
 
     res.json({
@@ -944,6 +944,71 @@ exports.getProductVariants = async (req, res) => {
   } catch (error) {
     console.error("Get variants error:", error);
     res.status(500).json({ error: "Failed to fetch variants" });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADD THIS to productController.js
+// GET /api/products/variant/:variantId
+// Resolves a variant → its parent product in one call.
+// Used by BuyAgainSheet's ProductVariantModal to load variants when
+// the order item only has product_variant_id (no product_id).
+// ─────────────────────────────────────────────────────────────────────────────
+exports.getVariantById = async (req, res) => {
+  try {
+    const { variantId } = req.params;
+
+    const result = await db.query(
+      `SELECT
+         pv.id,
+         pv.product_id,
+         pv.color,
+         pv.size,
+         pv.sku,
+         pv.stock_quantity,
+         COALESCE(pv.base_price, p.price)              AS base_price,
+         COALESCE(pv.discount_percentage, 0)           AS discount_percentage,
+         p.id                                          AS p_id,
+         p.name                                        AS p_name,
+         p.price                                       AS p_price,
+         p.original_price                              AS p_original_price,
+         p.discount_percentage                         AS p_discount_percentage,
+         p.images                                      AS p_images
+       FROM product_variants pv
+       JOIN products p ON pv.product_id = p.id
+       WHERE pv.id = $1`,
+      [variantId],
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Variant not found" });
+    }
+
+    const row = result.rows[0];
+
+    res.json({
+      variant: {
+        id: row.id,
+        product_id: row.product_id,
+        color: row.color,
+        size: row.size,
+        sku: row.sku,
+        stock_quantity: row.stock_quantity,
+        base_price: row.base_price,
+        discount_percentage: row.discount_percentage,
+      },
+      product: {
+        id: row.p_id,
+        name: row.p_name,
+        price: row.p_price,
+        original_price: row.p_original_price,
+        discount_percentage: row.p_discount_percentage,
+        images: row.p_images || [],
+      },
+    });
+  } catch (error) {
+    console.error("Get variant by ID error:", error);
+    res.status(500).json({ error: "Failed to fetch variant" });
   }
 };
 
@@ -989,7 +1054,7 @@ exports.createProduct = async (req, res) => {
         stock_quantity || 0,
         seller_id,
         tags || [],
-      ]
+      ],
     );
 
     res.status(201).json({
@@ -1123,7 +1188,7 @@ exports.createVariant = async (req, res) => {
         stock_quantity || 0,
         base_price || product.rows[0].price,
         discount_percentage || 0,
-      ]
+      ],
     );
 
     await redis.del(`product:${id}`);
@@ -1159,7 +1224,7 @@ exports.updateVariant = async (req, res) => {
 
     const variant = await db.query(
       `UPDATE product_variants SET ${setClause} WHERE id = $1 AND product_id = $2 RETURNING *`,
-      [variantId, id, ...values]
+      [variantId, id, ...values],
     );
 
     if (variant.rows.length === 0) {
@@ -1185,7 +1250,7 @@ exports.deleteVariant = async (req, res) => {
 
     const result = await db.query(
       "DELETE FROM product_variants WHERE id = $1 AND product_id = $2 RETURNING *",
-      [variantId, id]
+      [variantId, id],
     );
 
     if (result.rows.length === 0) {
@@ -1214,7 +1279,7 @@ exports.getProductVariants = async (req, res) => {
        FROM product_variants
        WHERE product_id = $1 AND stock_quantity >= 0
        ORDER BY color, size`,
-      [productId]
+      [productId],
     );
 
     res.json({
@@ -1270,7 +1335,7 @@ exports.createProduct = async (req, res) => {
         stock_quantity || 0,
         seller_id,
         tags || [],
-      ]
+      ],
     );
 
     res.status(201).json({
@@ -1414,7 +1479,7 @@ exports.createVariant = async (req, res) => {
         stock_quantity || 0,
         base_price || product.rows[0].price,
         discount_percentage || 0,
-      ]
+      ],
     );
 
     // Clear product cache
@@ -1484,7 +1549,7 @@ exports.deleteVariant = async (req, res) => {
 
     const result = await db.query(
       "DELETE FROM product_variants WHERE id = $1 AND product_id = $2 RETURNING *",
-      [variantId, id]
+      [variantId, id],
     );
 
     if (result.rows.length === 0) {

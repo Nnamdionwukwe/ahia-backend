@@ -14,6 +14,8 @@ router.get("/tags", productController.getTags);
 router.get("/categories", productController.getCategories);
 router.get("/:id/details", productController.getProductDetails);
 router.get("/:productId/variants", productController.getProductVariants);
+// GET /api/products/variant/:variantId
+router.get("/variant/:variantId", productController.getVariantById);
 
 // Protected routes
 router.post("/:id/view", authenticateUser, productController.trackView);
@@ -23,25 +25,25 @@ router.post(
   "/",
   authenticateUser,
   requireRole("admin"),
-  productController.createProduct
+  productController.createProduct,
 );
 router.put(
   "/:id",
   authenticateUser,
   requireRole("admin"),
-  productController.updateProduct
+  productController.updateProduct,
 );
 router.delete(
   "/:id",
   authenticateUser,
   requireRole("admin"),
-  productController.deleteProduct
+  productController.deleteProduct,
 );
 router.delete(
   "/:id/cache",
   authenticateUser,
   requireRole("admin"),
-  productController.clearCache
+  productController.clearCache,
 );
 
 // Variant management (Admin)
@@ -49,19 +51,19 @@ router.post(
   "/:id/variants",
   authenticateUser,
   requireRole("admin"),
-  productController.createVariant
+  productController.createVariant,
 );
 router.put(
   "/:id/variants/:variantId",
   authenticateUser,
   requireRole("admin"),
-  productController.updateVariant
+  productController.updateVariant,
 );
 router.delete(
   "/:id/variants/:variantId",
   authenticateUser,
   requireRole("admin"),
-  productController.deleteVariant
+  productController.deleteVariant,
 );
 
 module.exports = router;
