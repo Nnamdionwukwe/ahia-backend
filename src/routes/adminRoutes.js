@@ -4,7 +4,11 @@ const router = express.Router();
 const adminController = require("../controllers/adminController");
 const flashSalesController = require("../controllers/flashSalesController");
 const seasonalSalesController = require("../controllers/seasonalSalesController");
-const { authenticateToken, requireAdmin } = require("../middleware/auth");
+const {
+  authenticateToken,
+  requireAdmin,
+  requireRole,
+} = require("../middleware/auth");
 
 // ========================================================
 // USERS MANAGEMENT
