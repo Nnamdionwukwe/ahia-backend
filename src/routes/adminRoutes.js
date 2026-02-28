@@ -5,6 +5,7 @@ const adminController = require("../controllers/adminController");
 const flashSalesController = require("../controllers/flashSalesController");
 const seasonalSalesController = require("../controllers/seasonalSalesController");
 const { authenticateToken, requireAdmin } = require("../middleware/auth");
+const bankTransferController = require("../controllers/Banktransfercontroller");
 
 // ========================================================
 // USERS MANAGEMENT
@@ -340,6 +341,26 @@ router.get(
       res.status(500).json({ error: "Failed to fetch notification stats" });
     }
   },
+);
+
+// ========================================================
+// BANK TRANSFER ADMIN ACTIONS
+// ========================================================
+
+// POST /api/admin/payments/bank-transfer/approve
+router.post(
+  "/payments/bank-transfer/approve",
+  authenticateToken,
+  requireAdmin,
+  bankTransferController.approveBankTransfer,
+);
+
+// POST /api/admin/payments/bank-transfer/reject
+router.post(
+  "/payments/bank-transfer/reject",
+  authenticateToken,
+  requireAdmin,
+  bankTransferController.rejectBankTransfer,
 );
 
 module.exports = router;
