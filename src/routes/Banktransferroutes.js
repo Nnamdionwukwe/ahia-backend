@@ -32,4 +32,17 @@ router.get(
   bankTransferController.getBankTransferDetails,
 );
 
+router.post(
+  "/approve",
+  authenticateUser,
+  requireRole("admin"),
+  ctrl.approveBankTransfer,
+);
+router.post(
+  "/reject",
+  authenticateUser,
+  requireRole("admin"),
+  ctrl.rejectBankTransfer,
+);
+
 module.exports = router;

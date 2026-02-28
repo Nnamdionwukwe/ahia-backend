@@ -324,4 +324,11 @@ router.get(
   },
 );
 
+router.get(
+  "/payments",
+  authenticateUser,
+  requireRole("admin"),
+  adminCtrl.getAllPayments,
+);
+
 module.exports = router;

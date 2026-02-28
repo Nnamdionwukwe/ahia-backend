@@ -495,3 +495,231 @@ exports.getBankTransferDetails = async (req, res) => {
     });
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADD TO: src/controllers/bankTransferController.js
+//
+// Two new admin endpoints + one admin payments list endpoint.
+// Register them in your routes:
+//
+//  In bank-transfer.routes.js (admin only):
+//    const { requireRole } = require("../middleware/auth");
+//    router.post("/approve", authenticateUser, requireRole("admin"), ctrl.approveBankTransfer);
+//    router.post("/reject",  authenticateUser, requireRole("admin"), ctrl.rejectBankTransfer);
+//
+//  In admin.routes.js:
+//    router.get("/payments", authenticateUser, requireRole("admin"), adminCtrl.getAllPayments);
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/payments/bank-transfer/approve   (admin only)
+ * Marks payment success + order processing after admin confirms receipt.
+ */
+exports.approveBankTransfer = async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    const { reference } = req.body;
+    if (!reference)
+      return res
+        .status(400)
+        .json({ success: false, message: "Reference required" });
+
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      "SELECT * FROM payments WHERE reference = $1",
+      [reference],
+    );
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      return res
+        .status(404)
+        .json({ success: false, message: "Payment not found" });
+    }
+    const payment = rows[0];
+
+    if (payment.status === "success") {
+      await client.query("ROLLBACK");
+      return res
+        .status(400)
+        .json({ success: false, message: "Already approved" });
+    }
+
+    // Parse metadata safely (same pattern used in existing controller)
+    let meta = {};
+    try {
+      meta =
+        typeof payment.metadata === "string"
+          ? JSON.parse(payment.metadata)
+          : payment.metadata || {};
+    } catch {
+      meta = {};
+    }
+
+    await client.query(
+      `UPDATE payments
+       SET status = 'success', updated_at = NOW(), metadata = $1
+       WHERE reference = $2`,
+      [
+        JSON.stringify({
+          ...meta,
+          approved_at: new Date(),
+          approved_by: req.user.id,
+        }),
+        reference,
+      ],
+    );
+
+    await client.query(
+      `UPDATE orders
+       SET payment_status = 'paid', status = 'processing', updated_at = NOW()
+       WHERE id = $1`,
+      [payment.order_id],
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({
+      success: true,
+      message: "Payment approved. Order is now processing.",
+      data: { reference, order_id: payment.order_id, status: "success" },
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("approveBankTransfer error:", error);
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to approve",
+        error: error.message,
+      });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * POST /api/payments/bank-transfer/reject   (admin only)
+ */
+exports.rejectBankTransfer = async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    const { reference, reason } = req.body;
+    if (!reference)
+      return res
+        .status(400)
+        .json({ success: false, message: "Reference required" });
+
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      "SELECT * FROM payments WHERE reference = $1",
+      [reference],
+    );
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      return res
+        .status(404)
+        .json({ success: false, message: "Payment not found" });
+    }
+    const payment = rows[0];
+
+    let meta = {};
+    try {
+      meta =
+        typeof payment.metadata === "string"
+          ? JSON.parse(payment.metadata)
+          : payment.metadata || {};
+    } catch {
+      meta = {};
+    }
+
+    await client.query(
+      `UPDATE payments
+       SET status = 'failed', updated_at = NOW(), metadata = $1
+       WHERE reference = $2`,
+      [
+        JSON.stringify({
+          ...meta,
+          rejected_at: new Date(),
+          rejected_by: req.user.id,
+          rejection_reason: reason || "Rejected by admin",
+        }),
+        reference,
+      ],
+    );
+
+    await client.query(
+      `UPDATE orders SET payment_status = 'failed', updated_at = NOW() WHERE id = $1`,
+      [payment.order_id],
+    );
+
+    await client.query("COMMIT");
+    return res.status(200).json({
+      success: true,
+      message: "Payment rejected.",
+      data: { reference, order_id: payment.order_id, status: "failed" },
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("rejectBankTransfer error:", error);
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to reject",
+        error: error.message,
+      });
+  } finally {
+    client.release();
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADD TO: src/controllers/adminController.js
+//
+// GET /api/admin/payments?method=bank_transfer&status=pending&page=1&limit=500
+// ─────────────────────────────────────────────────────────────────────────────
+exports.getAllPayments = async (req, res) => {
+  try {
+    const { method, status, page = 1, limit = 100 } = req.query;
+    const offset = (page - 1) * limit;
+    const params = [];
+
+    let query = `
+      SELECT p.*, u.full_name as user_name, u.email as user_email
+      FROM payments p
+      LEFT JOIN users u ON p.user_id = u.id
+      WHERE 1=1
+    `;
+
+    if (method) {
+      params.push(method);
+      query += ` AND p.payment_method = $${params.length}`;
+    }
+    if (status) {
+      params.push(status);
+      query += ` AND p.status = $${params.length}`;
+    }
+
+    query += ` ORDER BY p.created_at DESC`;
+    params.push(Number(limit));
+    query += ` LIMIT $${params.length}`;
+    params.push(Number(offset));
+    query += ` OFFSET $${params.length}`;
+
+    const result = await db.query(query, params);
+    return res
+      .status(200)
+      .json({
+        success: true,
+        payments: result.rows,
+        count: result.rows.length,
+      });
+  } catch (error) {
+    console.error("getAllPayments error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch payments" });
+  }
+};
