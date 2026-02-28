@@ -92,12 +92,48 @@ router.put(
 // ========================================================
 // PAYMENTS MANAGEMENT
 // ========================================================
-router.get(
-  "/payments",
-  authenticateToken,
-  requireAdmin,
-  adminController.getAllPayments,
-);
+router.get("/payments", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const db = require("../config/database");
+    const { method, status, page = 1, limit = 100 } = req.query;
+    const offset = (page - 1) * limit;
+    const params = [];
+
+    let query = `
+        SELECT p.*, u.full_name as user_name, u.email as user_email
+        FROM payments p
+        LEFT JOIN users u ON p.user_id = u.id
+        WHERE 1=1
+      `;
+
+    if (method) {
+      params.push(method);
+      query += ` AND p.payment_method = $${params.length}`;
+    }
+    if (status) {
+      params.push(status);
+      query += ` AND p.status = $${params.length}`;
+    }
+
+    query += ` ORDER BY p.created_at DESC`;
+    params.push(Number(limit));
+    query += ` LIMIT $${params.length}`;
+    params.push(Number(offset));
+    query += ` OFFSET $${params.length}`;
+
+    const result = await db.query(query, params);
+    return res.status(200).json({
+      success: true,
+      payments: result.rows,
+      count: result.rows.length,
+    });
+  } catch (error) {
+    console.error("getAllPayments error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch payments" });
+  }
+});
 
 // ========================================================
 // FLASH SALES MANAGEMENT
