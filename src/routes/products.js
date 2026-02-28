@@ -4,18 +4,22 @@ const router = express.Router();
 const productController = require("../controllers/productController");
 const { authenticateUser, requireRole } = require("../middleware/auth");
 
-// Public routes
-// ✅ CHANGED: Use getAllProducts instead of getProducts
+// ─── Public routes ────────────────────────────────────────────────────────────
+
 router.get("/", productController.getAllProducts);
 router.get("/test-shuffle", productController.testShuffle);
 router.get("/search", productController.searchProducts);
 router.get("/brands", productController.getBrands);
 router.get("/tags", productController.getTags);
 router.get("/categories", productController.getCategories);
+
+// ✅ MUST be before any /:id wildcard routes — otherwise Express matches
+// "/variant/some-uuid" as /:id = "variant" and never reaches this handler
+router.get("/variant/:variantId", productController.getVariantById);
+
+// Wildcard /:id routes AFTER all fixed-path routes
 router.get("/:id/details", productController.getProductDetails);
 router.get("/:productId/variants", productController.getProductVariants);
-// GET /api/products/variant/:variantId
-router.get("/variant/:variantId", productController.getVariantById);
 
 // Protected routes
 router.post("/:id/view", authenticateUser, productController.trackView);

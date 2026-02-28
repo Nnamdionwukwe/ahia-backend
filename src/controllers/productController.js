@@ -948,11 +948,13 @@ exports.getProductVariants = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ADD THIS to productController.js
+// REPLACE the existing getVariantById in productController.js with this
+//
 // GET /api/products/variant/:variantId
-// Resolves a variant → its parent product in one call.
-// Used by BuyAgainSheet's ProductVariantModal to load variants when
-// the order item only has product_variant_id (no product_id).
+// Returns the variant + its parent product, with image_url computed from
+// the product images array (same logic as getProductDetails).
+// Used by PlaceOrderAgainModal to update the preview image when the user
+// picks a different variant.
 // ─────────────────────────────────────────────────────────────────────────────
 exports.getVariantById = async (req, res) => {
   try {
@@ -960,7 +962,7 @@ exports.getVariantById = async (req, res) => {
 
     const result = await db.query(
       `SELECT
-         pv.id,
+         pv.id                                          AS variant_id,
          pv.product_id,
          pv.color,
          pv.size,
@@ -985,10 +987,46 @@ exports.getVariantById = async (req, res) => {
     }
 
     const row = result.rows[0];
+    const productImages = row.p_images || [];
+
+    // ── Compute image_url the same way getProductDetails does ──────────────
+    // product_variants has no image_url column — images are stored on the
+    // products table and assigned to variants by colour index.
+    //
+    // Strategy:
+    //  1. Get every unique colour that exists for this product.
+    //  2. Find where this variant's colour sits in that ordered list.
+    //  3. Pick the product image at that index (wrapping if needed).
+    //  4. Fall back to the first product image if no colour match.
+
+    // Fetch all variants for this product so we can build the colour list
+    const siblingsResult = await db.query(
+      `SELECT DISTINCT color
+       FROM product_variants
+       WHERE product_id = $1
+       ORDER BY color NULLS LAST`,
+      [row.product_id],
+    );
+
+    const uniqueColors = siblingsResult.rows
+      .map((r) => r.color)
+      .filter(Boolean);
+
+    const colorIndex = uniqueColors.indexOf(row.color);
+
+    let image_url = null;
+    if (productImages.length > 0) {
+      if (colorIndex !== -1) {
+        // wrap with modulo so we never go out of bounds
+        image_url = productImages[colorIndex % productImages.length];
+      } else {
+        image_url = productImages[0];
+      }
+    }
 
     res.json({
       variant: {
-        id: row.id,
+        id: row.variant_id,
         product_id: row.product_id,
         color: row.color,
         size: row.size,
@@ -996,6 +1034,8 @@ exports.getVariantById = async (req, res) => {
         stock_quantity: row.stock_quantity,
         base_price: row.base_price,
         discount_percentage: row.discount_percentage,
+        // ✅ image_url is now always populated when the product has images
+        image_url,
       },
       product: {
         id: row.p_id,
@@ -1003,7 +1043,7 @@ exports.getVariantById = async (req, res) => {
         price: row.p_price,
         original_price: row.p_original_price,
         discount_percentage: row.p_discount_percentage,
-        images: row.p_images || [],
+        images: productImages,
       },
     });
   } catch (error) {
