@@ -5,6 +5,8 @@ const { v4: uuidv4 } = require("uuid");
 const fraudDetectionController = require("./fraudDetectionController");
 const notificationsController = require("./notificationsController");
 const loyaltyController = require("./loyaltyController");
+const fs = require("fs");
+const path = require("path");
 
 // Helper function to calculate total
 const calculateTotal = (items) => {
@@ -334,6 +336,18 @@ exports.cancelOrder = async (req, res) => {
 
 // ── Return order (customer) ───────────────────────────────────────────────────
 exports.returnOrder = async (req, res) => {
+  // Track uploaded file paths so we can clean up on error
+  const uploadedFiles = (req.files || []).map((f) => f.path);
+
+  const cleanupFiles = () => {
+    uploadedFiles.forEach((filePath) => {
+      fs.unlink(filePath, (err) => {
+        if (err)
+          console.warn("Failed to clean up file:", filePath, err.message);
+      });
+    });
+  };
+
   try {
     const userId = req.user.id;
     const orderId = req.params.id;
@@ -341,6 +355,7 @@ exports.returnOrder = async (req, res) => {
 
     // ── Validate input ────────────────────────────────────────────────────────
     if (!reason) {
+      cleanupFiles();
       return res.status(400).json({ error: "reason is required" });
     }
 
@@ -353,6 +368,7 @@ exports.returnOrder = async (req, res) => {
       "other",
     ];
     if (!validReasons.includes(reason)) {
+      cleanupFiles();
       return res.status(400).json({
         error: `Invalid reason. Allowed: ${validReasons.join(", ")}`,
       });
@@ -364,6 +380,7 @@ exports.returnOrder = async (req, res) => {
       "bank_transfer",
     ];
     if (!validRefundMethods.includes(refund_method)) {
+      cleanupFiles();
       return res.status(400).json({
         error: `Invalid refund_method. Allowed: ${validRefundMethods.join(", ")}`,
       });
@@ -378,6 +395,7 @@ exports.returnOrder = async (req, res) => {
     );
 
     if (orderResult.rows.length === 0) {
+      cleanupFiles();
       return res.status(404).json({ error: "Order not found" });
     }
 
@@ -385,6 +403,7 @@ exports.returnOrder = async (req, res) => {
 
     // Only delivered orders can be returned
     if (order.status !== "delivered") {
+      cleanupFiles();
       return res.status(400).json({
         error: "Only delivered orders can be returned",
         current_status: order.status,
@@ -395,6 +414,7 @@ exports.returnOrder = async (req, res) => {
     const deliveredAgo = Date.now() - new Date(order.created_at).getTime();
     const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
     if (deliveredAgo > THIRTY_DAYS) {
+      cleanupFiles();
       return res.status(400).json({
         error: "Return window has expired (30 days from order date)",
       });
@@ -411,6 +431,7 @@ exports.returnOrder = async (req, res) => {
     if (existing.rows.length > 0) {
       const prev = existing.rows[0];
       if (["pending", "approved"].includes(prev.status)) {
+        cleanupFiles();
         return res.status(409).json({
           error: "A return request already exists for this order",
           existing_return_id: prev.id,
@@ -419,11 +440,22 @@ exports.returnOrder = async (req, res) => {
       }
     }
 
+    // ── Build media metadata from uploaded files ───────────────────────────────
+    // Store relative paths + mime type so we can serve them later
+    const mediaFiles = (req.files || []).map((file) => ({
+      filename: file.filename,
+      path: file.path, // e.g. uploads/returns/return-xxx.jpg
+      url: `/uploads/returns/${file.filename}`, // public URL served by Express static
+      mimetype: file.mimetype,
+      size: file.size,
+      type: file.mimetype.startsWith("video/") ? "video" : "image",
+    }));
+
     // ── Create return request ─────────────────────────────────────────────────
     const returnResult = await db.query(
       `INSERT INTO order_returns
-         (order_id, user_id, reason, details, refund_method, refund_amount, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), NOW())
+         (order_id, user_id, reason, details, refund_method, refund_amount, media, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
        RETURNING *`,
       [
         orderId,
@@ -432,6 +464,7 @@ exports.returnOrder = async (req, res) => {
         details || null,
         refund_method,
         order.total_amount,
+        JSON.stringify(mediaFiles), // stored as JSONB column
       ],
     );
 
@@ -457,9 +490,13 @@ exports.returnOrder = async (req, res) => {
       success: true,
       message:
         "Return request submitted. We will review it within 1–3 business days.",
-      return: returnResult.rows[0],
+      return: {
+        ...returnResult.rows[0],
+        media: mediaFiles,
+      },
     });
   } catch (error) {
+    cleanupFiles();
     console.error("returnOrder error:", error);
     return res.status(500).json({ error: "Failed to submit return request" });
   }
@@ -483,6 +520,7 @@ exports.getMyReturns = async (req, res) => {
         r.refund_method,
         r.refund_amount,
         r.admin_note,
+        r.media,
         r.created_at,
         r.resolved_at,
         o.total_amount   AS order_total,
