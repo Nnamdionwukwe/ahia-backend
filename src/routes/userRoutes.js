@@ -2,40 +2,30 @@
 const express = require("express");
 const router = express.Router();
 const userController = require("../controllers/userController");
-const { authenticateToken } = require("../middleware/auth");
-
-/**
- * User Routes
- * Mounted at /api/userRoutes
- * All routes require authentication
- */
+const { authenticateUser } = require("../middleware/auth"); // fixed: was authenticateToken
 
 // Profile routes
-router.get("/profile", authenticateToken, userController.getProfile);
-router.put("/profile", authenticateToken, userController.updateProfile);
-router.delete("/account", authenticateToken, userController.deleteAccount);
+router.get("/profile", authenticateUser, userController.getProfile);
+router.put("/profile", authenticateUser, userController.updateProfile);
+router.delete("/account", authenticateUser, userController.deleteAccount);
 
 // Password management
 router.post(
   "/change-password",
-  authenticateToken,
+  authenticateUser,
   userController.changePassword,
 );
 
 // Order history
-router.get("/orders", authenticateToken, userController.getOrderHistory);
+router.get("/orders", authenticateUser, userController.getOrderHistory);
 
 // Address management
-router.get("/addresses", authenticateToken, userController.getAddresses);
-router.post("/addresses", authenticateToken, userController.addAddress);
-router.put("/addresses/:id", authenticateToken, userController.updateAddress);
-router.delete(
-  "/addresses/:id",
-  authenticateToken,
-  userController.deleteAddress,
-);
+router.get("/addresses", authenticateUser, userController.getAddresses);
+router.post("/addresses", authenticateUser, userController.addAddress);
+router.put("/addresses/:id", authenticateUser, userController.updateAddress);
+router.delete("/addresses/:id", authenticateUser, userController.deleteAddress);
 
 // User statistics
-router.get("/stats", authenticateToken, userController.getUserStats);
+router.get("/stats", authenticateUser, userController.getUserStats);
 
 module.exports = router;

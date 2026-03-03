@@ -1,11 +1,13 @@
+// app.js
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const path = require("path"); // ← required for __dirname joins
 require("dotenv").config();
 
 const app = express();
 
-// Middleware FIRST - before any imports that might fail
+// ── Security middleware ───────────────────────────────────────────────────────
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -14,7 +16,7 @@ app.use(
   }),
 );
 
-// CORS Configuration
+// ── CORS ──────────────────────────────────────────────────────────────────────
 const allowedOrigins = [
   "https://ahia-frontend.vercel.app",
   "https://ahia-backend-production.up.railway.app",
@@ -51,16 +53,23 @@ app.use(
 );
 
 app.options("*", cors());
+
+// ── Body parsers ──────────────────────────────────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging
+// NOTE: No express.static for uploads — files are stored on Cloudinary.
+//       Return media URLs are Cloudinary CDN URLs (https://res.cloudinary.com/...)
+//       stored in order_returns.media JSONB column.
+//       No local /uploads folder is needed on Railway.
+
+// ── Request logging ───────────────────────────────────────────────────────────
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
-// Basic health check FIRST - no dependencies
+// ── Health check (no dependencies) ───────────────────────────────────────────
 app.get("/health", (req, res) => {
   res.json({
     status: "healthy",
@@ -69,7 +78,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// API documentation
+// ── API docs ──────────────────────────────────────────────────────────────────
 app.get("/api", (req, res) => {
   res.json({
     message: "E-commerce API - Phase 5",
@@ -92,7 +101,7 @@ app.get("/api", (req, res) => {
   });
 });
 
-// Try to load database and redis (with error handling)
+// ── Config (DB + Redis) ───────────────────────────────────────────────────────
 let db, redis;
 try {
   db = require("./src/config/database");
@@ -102,12 +111,13 @@ try {
   console.error("⚠️  Database/Redis config failed:", error.message);
 }
 
-// Enhanced health check with DB/Redis if available
+// ── Full health check ─────────────────────────────────────────────────────────
 app.get("/health/full", async (req, res) => {
   try {
     let dbStatus = "not available";
     let redisStatus = "not available";
     let elasticsearchStatus = "not configured";
+    let cloudinaryStatus = "not configured";
 
     if (db) {
       try {
@@ -122,12 +132,18 @@ app.get("/health/full", async (req, res) => {
       redisStatus = redis.isOpen ? "connected" : "disconnected";
     }
 
+    if (
+      process.env.CLOUDINARY_CLOUD_NAME &&
+      process.env.CLOUDINARY_API_KEY &&
+      process.env.CLOUDINARY_API_SECRET
+    ) {
+      cloudinaryStatus = "configured";
+    }
+
     if (process.env.ELASTICSEARCH_URL) {
       try {
         const { Client } = require("@elastic/elasticsearch");
-        const esClient = new Client({
-          node: process.env.ELASTICSEARCH_URL,
-        });
+        const esClient = new Client({ node: process.env.ELASTICSEARCH_URL });
         await esClient.ping();
         elasticsearchStatus = "connected";
       } catch (e) {
@@ -139,20 +155,18 @@ app.get("/health/full", async (req, res) => {
       status: "healthy",
       database: dbStatus,
       redis: redisStatus,
+      cloudinary: cloudinaryStatus,
       elasticsearch: elasticsearchStatus,
       timestamp: new Date().toISOString(),
       phase: 5,
       version: "1.0.0",
     });
   } catch (error) {
-    res.status(500).json({
-      status: "unhealthy",
-      error: error.message,
-    });
+    res.status(500).json({ status: "unhealthy", error: error.message });
   }
 });
 
-// ============ LOAD ROUTES WITH DETAILED ERROR HANDLING ============
+// ── Routes ────────────────────────────────────────────────────────────────────
 let routes = {};
 const routeFiles = [
   { path: "/api/auth", file: "./src/routes/auth", name: "auth" },
@@ -179,29 +193,19 @@ const routeFiles = [
     file: "./src/routes/notifications",
     name: "notifications",
   },
-  {
-    path: "/api/analytics",
-    file: "./src/routes/analytics",
-    name: "analytics",
-  },
+  { path: "/api/analytics", file: "./src/routes/analytics", name: "analytics" },
   {
     path: "/api/userRoutes",
     file: "./src/routes/userRoutes",
     name: "userRoutes",
   },
-
   {
     path: "/api/payments/bank-transfer",
     file: "./src/routes/Banktransferroutes",
     name: "bankTransferRoutes",
   },
-
   { path: "/api/payments", file: "./src/routes/Payments", name: "payments" },
-  {
-    path: "/api/admin",
-    file: "./src/routes/adminRoutes",
-    name: "adminRoutes",
-  },
+  { path: "/api/admin", file: "./src/routes/adminRoutes", name: "adminRoutes" },
   {
     path: "/api/admin/loyalty",
     file: "./src/routes/adminLoyalty",
@@ -212,11 +216,7 @@ const routeFiles = [
     file: "./src/routes/adminCartRoutes",
     name: "adminCartRoutes",
   },
-  {
-    path: "/api/admin/fraud",
-    file: "./src/routes/fraud",
-    name: "fraud",
-  },
+  { path: "/api/admin/fraud", file: "./src/routes/fraud", name: "fraud" },
   {
     path: "/api/admin/adminReviews",
     file: "./src/routes/adminReviews",
@@ -224,35 +224,27 @@ const routeFiles = [
   },
 ];
 
-routeFiles.forEach(({ path, file, name }) => {
+routeFiles.forEach(({ path: routePath, file, name }) => {
   try {
     console.log(`\n📍 Loading ${name} from ${file}...`);
-
-    // Clear the require cache to ensure it fresh load
     delete require.cache[require.resolve(file)];
-
     const route = require(file);
-
-    // Verify it's a valid router/middleware
     if (!route || typeof route !== "function") {
       throw new Error(`${file} does not export a valid Express router`);
     }
-
-    app.use(path, route);
+    app.use(routePath, route);
     routes[name] = "loaded";
-    console.log(`✅ ${name} routes loaded successfully on path ${path}`);
+    console.log(`✅ ${name} routes loaded successfully on path ${routePath}`);
   } catch (error) {
     routes[name] = error.message;
     console.error(`\n❌ FAILED TO LOAD ${name}:`);
     console.error(`   File: ${file}`);
     console.error(`   Error: ${error.message}`);
-    if (error.stack) {
-      console.error(`   Stack: ${error.stack}`);
-    }
+    if (error.stack) console.error(`   Stack: ${error.stack}`);
   }
 });
 
-// Background jobs (only if not in test mode)
+// ── Background jobs ───────────────────────────────────────────────────────────
 if (process.env.NODE_ENV !== "test") {
   try {
     require("./src/jobs/scheduler");
@@ -271,7 +263,7 @@ if (process.env.NODE_ENV !== "test") {
   }
 }
 
-// 404 handler
+// ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({
     error: "Route not found",
@@ -281,21 +273,20 @@ app.use((req, res) => {
   });
 });
 
-// Error handler
+// ── Error handler ─────────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error("Error:", err);
-
   const message =
     process.env.NODE_ENV === "production"
       ? "Internal server error"
       : err.message;
-
   res.status(err.status || 500).json({
     error: message,
     ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
   });
 });
 
+// ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5001;
 
 const server = app.listen(PORT, "0.0.0.0", () => {
@@ -316,13 +307,10 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   console.log("\n");
 });
 
-// Graceful shutdown
+// ── Graceful shutdown ─────────────────────────────────────────────────────────
 process.on("SIGTERM", async () => {
   console.log("\n🛑 SIGTERM signal received");
-
-  server.close(() => {
-    console.log("✅ HTTP server closed");
-  });
+  server.close(() => console.log("✅ HTTP server closed"));
 
   if (db && db.pool) {
     try {
@@ -345,12 +333,10 @@ process.on("SIGTERM", async () => {
   process.exit(0);
 });
 
-// Catch uncaught errors
 process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error);
   process.exit(1);
 });
-
 process.on("unhandledRejection", (reason, promise) => {
   console.error("Unhandled Rejection at:", promise, "reason:", reason);
   process.exit(1);

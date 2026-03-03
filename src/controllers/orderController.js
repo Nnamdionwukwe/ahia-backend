@@ -605,4 +605,146 @@ exports.getReturnDetails = async (req, res) => {
   }
 };
 
+// ── returnOrder (drop-in replacement) ────────────────────────────────────────
+// Reads req.uploadedMedia set by handleReturnUpload middleware.
+// No local file cleanup needed — files go straight to Cloudinary.
+//
+exports.returnOrder = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const orderId = req.params.id;
+    const { reason, details, refund_method = "original_payment" } = req.body;
+
+    // ── Validate input ────────────────────────────────────────────────────────
+    if (!reason) {
+      return res.status(400).json({ error: "reason is required" });
+    }
+
+    const validReasons = [
+      "wrong_item",
+      "damaged",
+      "not_as_described",
+      "changed_mind",
+      "missing_item",
+      "other",
+    ];
+    if (!validReasons.includes(reason)) {
+      return res.status(400).json({
+        error: `Invalid reason. Allowed: ${validReasons.join(", ")}`,
+      });
+    }
+
+    const validRefundMethods = [
+      "original_payment",
+      "store_credit",
+      "bank_transfer",
+    ];
+    if (!validRefundMethods.includes(refund_method)) {
+      return res.status(400).json({
+        error: `Invalid refund_method. Allowed: ${validRefundMethods.join(", ")}`,
+      });
+    }
+
+    // ── Verify order ownership and eligibility ────────────────────────────────
+    const orderResult = await db.query(
+      `SELECT id, status, payment_status, total_amount, created_at
+       FROM orders
+       WHERE id = $1 AND user_id = $2`,
+      [orderId, userId],
+    );
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const order = orderResult.rows[0];
+
+    if (order.status !== "delivered") {
+      return res.status(400).json({
+        error: "Only delivered orders can be returned",
+        current_status: order.status,
+      });
+    }
+
+    const deliveredAgo = Date.now() - new Date(order.created_at).getTime();
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    if (deliveredAgo > THIRTY_DAYS) {
+      return res.status(400).json({
+        error: "Return window has expired (30 days from order date)",
+      });
+    }
+
+    // ── Check for existing return request ─────────────────────────────────────
+    const existing = await db.query(
+      `SELECT id, status FROM order_returns
+       WHERE order_id = $1 AND user_id = $2
+       ORDER BY created_at DESC LIMIT 1`,
+      [orderId, userId],
+    );
+
+    if (existing.rows.length > 0) {
+      const prev = existing.rows[0];
+      if (["pending", "approved"].includes(prev.status)) {
+        return res.status(409).json({
+          error: "A return request already exists for this order",
+          existing_return_id: prev.id,
+          existing_status: prev.status,
+        });
+      }
+    }
+
+    // ── Media: Cloudinary URLs set by handleReturnUpload middleware ───────────
+    // Each item: { public_id, url, mimetype, size, type, filename }
+    const mediaFiles = req.uploadedMedia || [];
+
+    // ── Create return request ─────────────────────────────────────────────────
+    const returnResult = await db.query(
+      `INSERT INTO order_returns
+         (order_id, user_id, reason, details, refund_method, refund_amount,
+          media, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
+       RETURNING *`,
+      [
+        orderId,
+        userId,
+        reason,
+        details || null,
+        refund_method,
+        order.total_amount,
+        JSON.stringify(mediaFiles),
+      ],
+    );
+
+    await db.query(
+      `UPDATE orders SET status = 'return_requested', updated_at = NOW()
+       WHERE id = $1`,
+      [orderId],
+    );
+
+    try {
+      await notificationsController.notifyOrderUpdate(
+        userId,
+        orderId,
+        "return_requested",
+        `Your return request for order #${orderId} has been received and is under review.`,
+      );
+    } catch (notifErr) {
+      console.warn("Return notification failed (non-fatal):", notifErr.message);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Return request submitted. We will review it within 1–3 business days.",
+      return: {
+        ...returnResult.rows[0],
+        media: mediaFiles,
+      },
+    });
+  } catch (error) {
+    console.error("returnOrder error:", error);
+    return res.status(500).json({ error: "Failed to submit return request" });
+  }
+};
+
 module.exports = exports;

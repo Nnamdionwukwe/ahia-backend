@@ -1,751 +1,639 @@
-// scripts/seed.js
-// Run: node scripts/seed.js
-// Or:  node scripts/seed.js --clean   (drops and recreates all data)
-
-require("dotenv").config();
-const { Pool } = require("pg");
-const { v4: uuidv4 } = require("uuid");
+// controllers/userController.js - FIXED VERSION
+const db = require("../config/database");
 const bcrypt = require("bcryptjs");
+const { v4: uuidv4 } = require("uuid");
 
-// ── DB connection (mirrors src/config/database.js) ────────────────────────────
-const isRailway = process.env.DATABASE_URL?.includes("railway.app");
-const isProduction = process.env.NODE_ENV === "production";
+/**
+ * User Controller
+ * Based on users table schema with UUID primary keys
+ */
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: isProduction || isRailway ? { rejectUnauthorized: false } : false,
-  max: 5,
-  connectionTimeoutMillis: 10000,
-});
+const userController = {
+  /**
+   * Get user profile
+   */
+  getProfile: async (req, res) => {
+    try {
+      const userId = req.user.id; // From auth middleware
 
-const db = { query: (text, params) => pool.query(text, params) };
-const CLEAN = process.argv.includes("--clean");
-
-// ── Palette of realistic seed data ───────────────────────────────────────────
-const USERS = [
-  {
-    name: "Amara Okonkwo",
-    email: "amara@example.com",
-    phone: "+2348011111111",
-  },
-  { name: "Chidi Eze", email: "chidi@example.com", phone: "+2348022222222" },
-  {
-    name: "Fatima Bello",
-    email: "fatima@example.com",
-    phone: "+2348033333333",
-  },
-  { name: "Emeka Nwosu", email: "emeka@example.com", phone: "+2348044444444" },
-  {
-    name: "Ngozi Adeyemi",
-    email: "ngozi@example.com",
-    phone: "+2348055555555",
-  },
-];
-
-const PRODUCTS = [
-  {
-    name: "Portable Monitor 15.6 Inch 1080P USB-C",
-    category: "Electronics",
-    description:
-      "Full HD portable display with USB-C and HDMI connectivity. Ideal for laptops and gaming.",
-    variants: [
-      { color: "Black", size: null, base_price: 98837, discount_percentage: 0 },
-      {
-        color: "Silver",
-        size: null,
-        base_price: 104500,
-        discount_percentage: 5,
-      },
-    ],
-  },
-  {
-    name: "Wireless Noise-Cancelling Headphones",
-    category: "Electronics",
-    description:
-      "30-hour battery life, active noise cancellation, foldable design.",
-    variants: [
-      {
-        color: "Black",
-        size: null,
-        base_price: 55000,
-        discount_percentage: 10,
-      },
-      {
-        color: "White",
-        size: null,
-        base_price: 55000,
-        discount_percentage: 10,
-      },
-    ],
-  },
-  {
-    name: "Men's Slim-Fit Ankara Shirt",
-    category: "Fashion",
-    description: "Premium hand-dyed Ankara fabric, slim fit, long sleeve.",
-    variants: [
-      {
-        color: "Blue/Orange",
-        size: "S",
-        base_price: 12500,
-        discount_percentage: 0,
-      },
-      {
-        color: "Blue/Orange",
-        size: "M",
-        base_price: 12500,
-        discount_percentage: 0,
-      },
-      {
-        color: "Blue/Orange",
-        size: "L",
-        base_price: 12500,
-        discount_percentage: 0,
-      },
-      {
-        color: "Red/Gold",
-        size: "M",
-        base_price: 13000,
-        discount_percentage: 5,
-      },
-    ],
-  },
-  {
-    name: "Non-stick Granite Cookware Set (5-piece)",
-    category: "Home & Kitchen",
-    description:
-      "Granite-coated pots and pans, induction-compatible, heat-resistant handles.",
-    variants: [
-      { color: "Grey", size: null, base_price: 34900, discount_percentage: 15 },
-      {
-        color: "Copper",
-        size: null,
-        base_price: 37500,
-        discount_percentage: 10,
-      },
-    ],
-  },
-  {
-    name: "Kids' Educational Tablet 7 Inch",
-    category: "Electronics",
-    description:
-      "Android 11, parental controls, 32 GB storage, shockproof case.",
-    variants: [
-      { color: "Pink", size: null, base_price: 41000, discount_percentage: 0 },
-      { color: "Blue", size: null, base_price: 41000, discount_percentage: 0 },
-      { color: "Green", size: null, base_price: 41000, discount_percentage: 5 },
-    ],
-  },
-  {
-    name: "Luxury Perfume Gift Set",
-    category: "Beauty",
-    description: "Set of 3 × 50 ml Eau de Parfum with presentation box.",
-    variants: [
-      {
-        color: "Gold Edition",
-        size: null,
-        base_price: 28000,
-        discount_percentage: 0,
-      },
-      {
-        color: "Silver Edition",
-        size: null,
-        base_price: 24500,
-        discount_percentage: 10,
-      },
-    ],
-  },
-];
-
-const RETURN_REASONS = [
-  "wrong_item",
-  "damaged",
-  "not_as_described",
-  "changed_mind",
-  "missing_item",
-  "other",
-];
-
-const RETURN_METHODS = ["original_payment", "store_credit", "bank_transfer"];
-
-const ORDER_STATUSES = [
-  "pending",
-  "processing",
-  "shipped",
-  "delivered",
-  "cancelled",
-  "return_requested",
-];
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
-const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
-const randN = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-const daysAgo = (n) => new Date(Date.now() - n * 86_400_000);
-const daysFromNow = (n) => new Date(Date.now() + n * 86_400_000);
-
-function log(msg) {
-  console.log(`  ✓ ${msg}`);
-}
-function warn(msg) {
-  console.warn(`  ⚠ ${msg}`);
-}
-function section(title) {
-  console.log(`\n${"─".repeat(50)}`);
-  console.log(`  ${title}`);
-  console.log("─".repeat(50));
-}
-
-// ── Schema creation ───────────────────────────────────────────────────────────
-async function createSchema() {
-  section("Creating / verifying schema");
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      name              TEXT NOT NULL,
-      email             TEXT UNIQUE NOT NULL,
-      phone             TEXT,
-      password_hash     TEXT NOT NULL,
-      role              TEXT NOT NULL DEFAULT 'customer',
-      is_verified       BOOLEAN DEFAULT true,
-      avatar_url        TEXT,
-      created_at        TIMESTAMPTZ DEFAULT NOW(),
-      updated_at        TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  log("users");
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS products (
-      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      name        TEXT NOT NULL,
-      category    TEXT NOT NULL,
-      description TEXT,
-      images      JSONB DEFAULT '[]'::jsonb,
-      is_active   BOOLEAN DEFAULT true,
-      created_at  TIMESTAMPTZ DEFAULT NOW(),
-      updated_at  TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  log("products");
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS product_variants (
-      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      product_id          UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-      color               TEXT,
-      size                TEXT,
-      base_price          NUMERIC(12,2) NOT NULL,
-      discount_percentage NUMERIC(5,2)  DEFAULT 0,
-      stock_quantity      INT           DEFAULT 100,
-      sku                 TEXT,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  log("product_variants");
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      total_amount      NUMERIC(12,2) NOT NULL,
-      discount_amount   NUMERIC(12,2) DEFAULT 0,
-      delivery_address  JSONB,
-      status            TEXT NOT NULL DEFAULT 'pending',
-      payment_method    TEXT NOT NULL DEFAULT 'card',
-      payment_status    TEXT NOT NULL DEFAULT 'paid',
-      estimated_delivery TIMESTAMPTZ,
-      created_at        TIMESTAMPTZ DEFAULT NOW(),
-      updated_at        TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  log("orders");
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS order_items (
-      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      order_id            UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-      product_variant_id  UUID NOT NULL REFERENCES product_variants(id),
-      quantity            INT           NOT NULL DEFAULT 1,
-      unit_price          NUMERIC(12,2) NOT NULL,
-      subtotal            NUMERIC(12,2) NOT NULL,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  log("order_items");
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS order_returns (
-      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      order_id       UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-      user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      reason         TEXT NOT NULL,
-      details        TEXT,
-      status         TEXT NOT NULL DEFAULT 'pending',
-      refund_method  TEXT NOT NULL DEFAULT 'original_payment',
-      refund_amount  NUMERIC(12,2),
-      admin_note     TEXT,
-      media          JSONB DEFAULT '[]'::jsonb,
-      created_at     TIMESTAMPTZ DEFAULT NOW(),
-      updated_at     TIMESTAMPTZ DEFAULT NOW(),
-      resolved_at    TIMESTAMPTZ
-    )
-  `);
-  log("order_returns");
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS carts (
-      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      product_variant_id  UUID NOT NULL REFERENCES product_variants(id),
-      quantity            INT DEFAULT 1,
-      is_selected         BOOLEAN DEFAULT true,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  log("carts");
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS promotions (
-      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      code                TEXT UNIQUE NOT NULL,
-      discount_percentage NUMERIC(5,2) NOT NULL,
-      expiry_date         TIMESTAMPTZ NOT NULL,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  log("promotions");
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS referrals (
-      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      referrer_id      UUID REFERENCES users(id) ON DELETE CASCADE,
-      referred_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-      status           TEXT DEFAULT 'pending',
-      points_awarded   INT  DEFAULT 0,
-      completed_at     TIMESTAMPTZ,
-      created_at       TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  log("referrals");
-}
-
-// ── Clean slate ───────────────────────────────────────────────────────────────
-async function cleanData() {
-  section("Cleaning existing seed data");
-  // Order matters — children first
-  const tables = [
-    "order_returns",
-    "order_items",
-    "carts",
-    "orders",
-    "product_variants",
-    "products",
-    "referrals",
-    "promotions",
-    "users",
-  ];
-  for (const t of tables) {
-    await db.query(`DELETE FROM ${t}`);
-    log(`cleared ${t}`);
-  }
-}
-
-// ── Seed users ────────────────────────────────────────────────────────────────
-// Columns match your actual schema (confirmed from userController.js):
-//   full_name, email, phone_number, password_hash, role
-async function seedUsers() {
-  section("Seeding users");
-  const hash = await bcrypt.hash("Password123!", 10);
-  const ids = [];
-
-  for (const u of USERS) {
-    const res = await db.query(
-      `INSERT INTO users (full_name, email, phone_number, password_hash, role)
-       VALUES ($1, $2, $3, $4, 'customer')
-       ON CONFLICT (email) DO UPDATE
-         SET full_name     = EXCLUDED.full_name,
-             phone_number  = EXCLUDED.phone_number,
-             password_hash = EXCLUDED.password_hash
-       RETURNING id`,
-      [u.name, u.email, u.phone, hash],
-    );
-    ids.push(res.rows[0].id);
-    log(`user: ${u.name} <${u.email}>`);
-  }
-
-  await db.query(
-    `INSERT INTO users (full_name, email, phone_number, password_hash, role)
-     VALUES ('Admin User', 'admin@ahia.ng', '+2348099999999', $1, 'admin')
-     ON CONFLICT (email) DO UPDATE
-       SET role          = 'admin',
-           password_hash = EXCLUDED.password_hash
-     RETURNING id`,
-    [hash],
-  );
-  log("user: Admin User <admin@ahia.ng>");
-
-  return ids;
-}
-
-// ── Seed products + variants ──────────────────────────────────────────────────
-async function seedProducts() {
-  section("Seeding products & variants");
-  const variantIds = [];
-
-  for (const p of PRODUCTS) {
-    const prodRes = await db.query(
-      `INSERT INTO products (name, category, description, images)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id`,
-      [p.name, p.category, p.description, JSON.stringify(["/placeholder.png"])],
-    );
-    const productId = prodRes.rows[0].id;
-    log(`product: ${p.name}`);
-
-    for (const v of p.variants) {
-      const sku = `${p.category.slice(0, 3).toUpperCase()}-${uuidv4().slice(0, 6).toUpperCase()}`;
-      const varRes = await db.query(
-        `INSERT INTO product_variants (product_id, color, size, base_price, discount_percentage, sku)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id`,
-        [productId, v.color, v.size, v.base_price, v.discount_percentage, sku],
+      const result = await db.query(
+        `SELECT 
+          id, 
+          phone_number, 
+          full_name, 
+          profile_image, 
+          email, 
+          role, 
+          is_verified, 
+          signup_method,
+          created_at, 
+          updated_at
+        FROM users 
+        WHERE id = $1`,
+        [userId],
       );
-      variantIds.push({ id: varRes.rows[0].id, ...v });
-      log(
-        `  variant: ${v.color || ""}${v.size ? ` / ${v.size}` : ""} — ₦${v.base_price.toLocaleString()}`,
-      );
-    }
-  }
 
-  return variantIds;
-}
-
-// ── Seed promotions ───────────────────────────────────────────────────────────
-async function seedPromotions() {
-  section("Seeding promotions");
-  const promos = [
-    {
-      code: "WELCOME10",
-      discount_percentage: 10,
-      expiry_date: daysFromNow(90),
-    },
-    { code: "AHIA20", discount_percentage: 20, expiry_date: daysFromNow(30) },
-    {
-      code: "FESTIVE15",
-      discount_percentage: 15,
-      expiry_date: daysFromNow(14),
-    },
-    { code: "EXPIRED5", discount_percentage: 5, expiry_date: daysAgo(10) },
-  ];
-  for (const p of promos) {
-    await db.query(
-      `INSERT INTO promotions (code, discount_percentage, expiry_date)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (code) DO NOTHING`,
-      [p.code, p.discount_percentage, p.expiry_date],
-    );
-    log(`promo: ${p.code} (${p.discount_percentage}% off)`);
-  }
-}
-
-// ── Seed orders + items ───────────────────────────────────────────────────────
-async function seedOrders(userIds, variants) {
-  section("Seeding orders & order items");
-  const deliveredOrderIds = []; // used later to attach returns
-
-  const addresses = [
-    {
-      street: "14 Adeola Odeku St",
-      city: "Victoria Island",
-      state: "Lagos",
-      country: "Nigeria",
-    },
-    {
-      street: "22 Wuse Zone 5",
-      city: "Abuja",
-      state: "FCT",
-      country: "Nigeria",
-    },
-    {
-      street: "5 Ogui Road",
-      city: "Enugu",
-      state: "Enugu",
-      country: "Nigeria",
-    },
-    {
-      street: "10 Trans Amadi",
-      city: "Port Harcourt",
-      state: "Rivers",
-      country: "Nigeria",
-    },
-    {
-      street: "31 Ahmadu Bello Way",
-      city: "Kano",
-      state: "Kano",
-      country: "Nigeria",
-    },
-  ];
-
-  const paymentMethods = ["card", "bank_transfer", "ussd", "wallet"];
-
-  // 4 orders per user → 20 orders total, varied statuses
-  for (const userId of userIds) {
-    for (let i = 0; i < 4; i++) {
-      const orderId = uuidv4();
-      const status = rand(ORDER_STATUSES);
-      const createdAt = daysAgo(randN(5, 60));
-      const estimatedDelivery = daysFromNow(randN(2, 7));
-      const paymentMethod = rand(paymentMethods);
-      const address = rand(addresses);
-
-      // Pick 1–3 random variants for this order
-      const chosenVariants = [];
-      const count = randN(1, 3);
-      const shuffled = [...variants].sort(() => Math.random() - 0.5);
-      for (let j = 0; j < count; j++) chosenVariants.push(shuffled[j]);
-
-      // Calculate totals
-      let totalAmount = 0;
-      let discountAmount = 0;
-      const lineItems = chosenVariants.map((v) => {
-        const disc = v.base_price * (v.discount_percentage / 100);
-        const unit = v.base_price - disc;
-        const qty = randN(1, 2);
-        const sub = unit * qty;
-        totalAmount += sub;
-        discountAmount += disc * qty;
-        return { variantId: v.id, qty, unit, sub };
-      });
-
-      // Apply random promo discount (30% chance)
-      if (Math.random() < 0.3) {
-        const extra = totalAmount * 0.1;
-        discountAmount += extra;
-        totalAmount -= extra;
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
       }
 
-      await db.query(
-        `INSERT INTO orders
-           (id, user_id, total_amount, discount_amount, delivery_address, status,
-            payment_method, payment_status, estimated_delivery, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'paid',$8,$9,$9)`,
-        [
-          orderId,
-          userId,
-          totalAmount.toFixed(2),
-          discountAmount.toFixed(2),
-          JSON.stringify(address),
-          status,
-          paymentMethod,
-          estimatedDelivery,
-          createdAt,
-        ],
+      res.json({
+        success: true,
+        user: result.rows[0],
+      });
+    } catch (error) {
+      console.error("Get profile error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch profile",
+      });
+    }
+  },
+
+  /**
+   * Update user profile
+   */
+  updateProfile: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { full_name, phone_number, profile_image } = req.body;
+
+      const updates = [];
+      const values = [];
+      let paramCount = 1;
+
+      if (full_name !== undefined) {
+        updates.push(`full_name = $${paramCount}`);
+        values.push(full_name);
+        paramCount++;
+      }
+
+      if (phone_number !== undefined) {
+        updates.push(`phone_number = $${paramCount}`);
+        values.push(phone_number);
+        paramCount++;
+      }
+
+      if (profile_image !== undefined) {
+        updates.push(`profile_image = $${paramCount}`);
+        values.push(profile_image);
+        paramCount++;
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No fields to update",
+        });
+      }
+
+      updates.push(`updated_at = NOW()`);
+      values.push(userId);
+
+      const query = `
+        UPDATE users 
+        SET ${updates.join(", ")}
+        WHERE id = $${paramCount}
+        RETURNING 
+          id, 
+          phone_number, 
+          full_name, 
+          profile_image, 
+          email, 
+          role, 
+          is_verified,
+          created_at,
+          updated_at
+      `;
+
+      const result = await db.query(query, values);
+
+      res.json({
+        success: true,
+        message: "Profile updated successfully",
+        user: result.rows[0],
+      });
+    } catch (error) {
+      console.error("Update profile error:", error);
+
+      // Handle unique constraint violations
+      if (error.code === "23505") {
+        if (error.constraint === "users_phone_number_key") {
+          return res.status(400).json({
+            success: false,
+            message: "Phone number already in use",
+          });
+        }
+      }
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to update profile",
+      });
+    }
+  },
+
+  /**
+   * Change password
+   */
+  changePassword: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { current_password, new_password } = req.body;
+
+      if (!current_password || !new_password) {
+        return res.status(400).json({
+          success: false,
+          message: "Current password and new password are required",
+        });
+      }
+
+      if (new_password.length < 6) {
+        return res.status(400).json({
+          success: false,
+          message: "New password must be at least 6 characters",
+        });
+      }
+
+      // Get current password hash
+      const userResult = await db.query(
+        "SELECT password_hash FROM users WHERE id = $1",
+        [userId],
       );
 
-      for (const li of lineItems) {
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      const user = userResult.rows[0];
+
+      // Check if password_hash exists (Google users won't have it)
+      if (!user.password_hash) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot change password for Google authenticated accounts",
+        });
+      }
+
+      // Verify current password
+      const isValidPassword = await bcrypt.compare(
+        current_password,
+        user.password_hash,
+      );
+
+      if (!isValidPassword) {
+        return res.status(401).json({
+          success: false,
+          message: "Current password is incorrect",
+        });
+      }
+
+      // Hash new password
+      const hashedPassword = await bcrypt.hash(new_password, 10);
+
+      // Update password
+      await db.query(
+        `UPDATE users 
+         SET password_hash = $1, updated_at = NOW() 
+         WHERE id = $2`,
+        [hashedPassword, userId],
+      );
+
+      res.json({
+        success: true,
+        message: "Password changed successfully",
+      });
+    } catch (error) {
+      console.error("Change password error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to change password",
+      });
+    }
+  },
+
+  /**
+   * Delete user account
+   */
+  deleteAccount: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { password } = req.body;
+
+      // Get user
+      const userResult = await db.query(
+        "SELECT password_hash, signup_method FROM users WHERE id = $1",
+        [userId],
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      const user = userResult.rows[0];
+
+      // Verify password for phone signup users
+      if (user.signup_method === "phone" && user.password_hash) {
+        if (!password) {
+          return res.status(400).json({
+            success: false,
+            message: "Password required to delete account",
+          });
+        }
+
+        const isValidPassword = await bcrypt.compare(
+          password,
+          user.password_hash,
+        );
+        if (!isValidPassword) {
+          return res.status(401).json({
+            success: false,
+            message: "Invalid password",
+          });
+        }
+      }
+
+      // Delete user (cascade will handle related records)
+      await db.query("DELETE FROM users WHERE id = $1", [userId]);
+
+      res.json({
+        success: true,
+        message: "Account deleted successfully",
+      });
+    } catch (error) {
+      console.error("Delete account error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to delete account",
+      });
+    }
+  },
+
+  /**
+   * Get user's order history
+   */
+  getOrderHistory: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { page = 1, limit = 10, status } = req.query;
+      const offset = (page - 1) * limit;
+
+      let query = `
+        SELECT 
+          o.id,
+          o.total_amount,
+          o.discount_amount,
+          o.status,
+          o.payment_method,
+          o.created_at,
+          o.estimated_delivery,
+          COUNT(oi.id) as item_count
+        FROM orders o
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        WHERE o.user_id = $1
+      `;
+
+      const params = [userId];
+
+      if (status) {
+        query += ` AND o.status = $${params.length + 1}`;
+        params.push(status);
+      }
+
+      query += `
+        GROUP BY o.id
+        ORDER BY o.created_at DESC
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+      `;
+      params.push(limit, offset);
+
+      const result = await db.query(query, params);
+
+      // Get total count
+      let countQuery = "SELECT COUNT(*) FROM orders WHERE user_id = $1";
+      const countParams = [userId];
+
+      if (status) {
+        countQuery += " AND status = $2";
+        countParams.push(status);
+      }
+
+      const countResult = await db.query(countQuery, countParams);
+
+      res.json({
+        success: true,
+        orders: result.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: parseInt(countResult.rows[0].count),
+          pages: Math.ceil(countResult.rows[0].count / limit),
+        },
+      });
+    } catch (error) {
+      console.error("Get order history error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch order history",
+      });
+    }
+  },
+
+  /**
+   * Get user's addresses
+   */
+  getAddresses: async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      const result = await db.query(
+        `SELECT 
+          id,
+          address_line1,
+          address_line2,
+          city,
+          state,
+          country,
+          postal_code,
+          is_default,
+          created_at
+        FROM addresses
+        WHERE user_id = $1
+        ORDER BY is_default DESC, created_at DESC`,
+        [userId],
+      );
+
+      res.json({
+        success: true,
+        addresses: result.rows,
+      });
+    } catch (error) {
+      console.error("Get addresses error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch addresses",
+      });
+    }
+  },
+
+  /**
+   * Add new address
+   */
+  addAddress: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const {
+        address_line1,
+        address_line2,
+        city,
+        state,
+        country,
+        postal_code,
+        is_default,
+      } = req.body;
+
+      if (!address_line1 || !city || !state || !country) {
+        return res.status(400).json({
+          success: false,
+          message: "Address line 1, city, state, and country are required",
+        });
+      }
+
+      // If setting as default, unset other default addresses
+      if (is_default) {
         await db.query(
-          `INSERT INTO order_items (id, order_id, product_variant_id, quantity, unit_price, subtotal, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [
-            uuidv4(),
-            orderId,
-            li.variantId,
-            li.qty,
-            li.unit.toFixed(2),
-            li.sub.toFixed(2),
-            createdAt,
-          ],
+          "UPDATE addresses SET is_default = false WHERE user_id = $1",
+          [userId],
         );
       }
 
-      // Track delivered orders for return seeding
-      if (status === "delivered" || status === "return_requested") {
-        deliveredOrderIds.push({ orderId, userId, totalAmount, createdAt });
+      const result = await db.query(
+        `INSERT INTO addresses 
+         (id, user_id, address_line1, address_line2, city, state, country, postal_code, is_default, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+         RETURNING *`,
+        [
+          uuidv4(),
+          userId,
+          address_line1,
+          address_line2 || null,
+          city,
+          state,
+          country,
+          postal_code || null,
+          is_default || false,
+        ],
+      );
+
+      res.status(201).json({
+        success: true,
+        message: "Address added successfully",
+        address: result.rows[0],
+      });
+    } catch (error) {
+      console.error("Add address error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to add address",
+      });
+    }
+  },
+
+  /**
+   * Update address
+   */
+  updateAddress: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { id: addressId } = req.params;
+      const {
+        address_line1,
+        address_line2,
+        city,
+        state,
+        country,
+        postal_code,
+        is_default,
+      } = req.body;
+
+      // Verify address belongs to user
+      const checkResult = await db.query(
+        "SELECT id FROM addresses WHERE id = $1 AND user_id = $2",
+        [addressId, userId],
+      );
+
+      if (checkResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Address not found",
+        });
       }
 
-      log(
-        `order ${orderId.slice(0, 8)}… [${status}] ₦${totalAmount.toFixed(0)} · ${paymentMethod}`,
+      // If setting as default, unset other defaults
+      if (is_default) {
+        await db.query(
+          "UPDATE addresses SET is_default = false WHERE user_id = $1 AND id != $2",
+          [userId, addressId],
+        );
+      }
+
+      const updates = [];
+      const values = [];
+      let paramCount = 1;
+
+      const fields = {
+        address_line1,
+        address_line2,
+        city,
+        state,
+        country,
+        postal_code,
+        is_default,
+      };
+
+      for (const [key, value] of Object.entries(fields)) {
+        if (value !== undefined) {
+          updates.push(`${key} = $${paramCount}`);
+          values.push(value);
+          paramCount++;
+        }
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No fields to update",
+        });
+      }
+
+      values.push(addressId, userId);
+
+      const result = await db.query(
+        `UPDATE addresses 
+         SET ${updates.join(", ")}
+         WHERE id = $${paramCount} AND user_id = $${paramCount + 1}
+         RETURNING *`,
+        values,
       );
+
+      res.json({
+        success: true,
+        message: "Address updated successfully",
+        address: result.rows[0],
+      });
+    } catch (error) {
+      console.error("Update address error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to update address",
+      });
     }
-  }
+  },
 
-  return deliveredOrderIds;
-}
+  /**
+   * Delete address
+   */
+  deleteAddress: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { id: addressId } = req.params;
 
-// ── Seed return requests ──────────────────────────────────────────────────────
-async function seedReturns(deliveredOrders) {
-  section("Seeding return requests");
-
-  if (deliveredOrders.length === 0) {
-    warn("No delivered orders found — skipping returns");
-    return;
-  }
-
-  const returnStatuses = ["pending", "approved", "rejected", "completed"];
-
-  // Create a return for roughly 70% of delivered orders
-  for (const { orderId, userId, totalAmount, createdAt } of deliveredOrders) {
-    if (Math.random() > 0.7) continue; // skip ~30%
-
-    const returnId = uuidv4();
-    const reason = rand(RETURN_REASONS);
-    const method = rand(RETURN_METHODS);
-    const status = rand(returnStatuses);
-    const returnedAt = new Date(
-      new Date(createdAt).getTime() + randN(1, 15) * 86_400_000,
-    );
-    const resolvedAt = ["rejected", "completed"].includes(status)
-      ? new Date(returnedAt.getTime() + randN(2, 5) * 86_400_000)
-      : null;
-
-    const adminNote = {
-      rejected: "Return request did not meet our policy requirements.",
-      completed: "Refund has been processed to your original payment method.",
-      approved: null,
-      pending: null,
-    }[status];
-
-    // Sample media metadata (as if files were already uploaded)
-    const media =
-      reason === "damaged"
-        ? [
-            {
-              filename: `return-sample-${returnId.slice(0, 8)}.jpg`,
-              url: `/uploads/returns/return-sample-${returnId.slice(0, 8)}.jpg`,
-              mimetype: "image/jpeg",
-              size: 184320,
-              type: "image",
-            },
-          ]
-        : [];
-
-    await db.query(
-      `INSERT INTO order_returns
-         (id, order_id, user_id, reason, details, status, refund_method,
-          refund_amount, admin_note, media, created_at, updated_at, resolved_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,$12)`,
-      [
-        returnId,
-        orderId,
-        userId,
-        reason,
-        reason === "damaged"
-          ? "The product arrived with a cracked screen and dented casing."
-          : reason === "wrong_item"
-            ? "I ordered the black variant but received white."
-            : null,
-        status,
-        method,
-        totalAmount.toFixed(2),
-        adminNote,
-        JSON.stringify(media),
-        returnedAt,
-        resolvedAt,
-      ],
-    );
-
-    log(
-      `return ${returnId.slice(0, 8)}… [${status}] reason=${reason} · ₦${totalAmount.toFixed(0)}`,
-    );
-  }
-}
-
-// ── Seed carts ────────────────────────────────────────────────────────────────
-async function seedCarts(userIds, variants) {
-  section("Seeding carts");
-  // Give first 2 users active cart items
-  for (const userId of userIds.slice(0, 2)) {
-    const picks = [...variants]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, randN(1, 3));
-    for (const v of picks) {
-      await db.query(
-        `INSERT INTO carts (user_id, product_variant_id, quantity, is_selected)
-         VALUES ($1, $2, $3, true)
-         ON CONFLICT DO NOTHING`,
-        [userId, v.id, randN(1, 2)],
+      const result = await db.query(
+        "DELETE FROM addresses WHERE id = $1 AND user_id = $2 RETURNING *",
+        [addressId, userId],
       );
-      log(
-        `cart item for user ${userId.slice(0, 8)}… → variant ${v.id.slice(0, 8)}…`,
-      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Address not found",
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Address deleted successfully",
+      });
+    } catch (error) {
+      console.error("Delete address error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to delete address",
+      });
     }
-  }
-}
+  },
 
-// ── Seed referrals ────────────────────────────────────────────────────────────
-async function seedReferrals(userIds) {
-  section("Seeding referrals");
-  // User 0 referred users 1 and 2
-  for (let i = 1; i <= 2; i++) {
-    await db.query(
-      `INSERT INTO referrals (referrer_id, referred_user_id, status, points_awarded, completed_at)
-       VALUES ($1, $2, 'completed', 500, NOW())`,
-      [userIds[0], userIds[i]],
-    );
-    log(`referral: user[0] → user[${i}]`);
-  }
-}
+  /**
+   * Get user statistics - FIXED VERSION
+   */
+  getUserStats: async (req, res) => {
+    try {
+      const userId = req.user.id;
 
-// ── Summary ───────────────────────────────────────────────────────────────────
-async function printSummary() {
-  section("Seed summary");
-  const tables = [
-    "users",
-    "products",
-    "product_variants",
-    "orders",
-    "order_items",
-    "order_returns",
-    "carts",
-    "promotions",
-  ];
-  for (const t of tables) {
-    const res = await db.query(`SELECT COUNT(*) FROM ${t}`);
-    log(`${t}: ${res.rows[0].count} rows`);
-  }
-  console.log(`
-  ─────────────────────────────────────────────
-  Test credentials (all passwords: Password123!)
-  ─────────────────────────────────────────────
-  Customer : amara@example.com
-  Customer : chidi@example.com
-  Customer : fatima@example.com
-  Admin    : admin@ahia.ng
-  ─────────────────────────────────────────────
-  `);
-}
+      // Get order stats
+      const orderStats = await db.query(
+        `SELECT 
+          COUNT(*) as total_orders,
+          COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders,
+          COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
+          COALESCE(SUM(total_amount), 0) as total_spent
+        FROM orders
+        WHERE user_id = $1`,
+        [userId],
+      );
 
-// ── Entry point ───────────────────────────────────────────────────────────────
-async function main() {
-  console.log("\n🌱  Ahia DB Seeder");
-  console.log(
-    `   Mode  : ${CLEAN ? "CLEAN (delete + reseed)" : "UPSERT (safe)"}`,
-  );
-  console.log(
-    `   DB    : ${process.env.DATABASE_URL?.replace(/:[^:@]+@/, ":***@")}\n`,
-  );
+      // Initialize stats object with defaults
+      const stats = {
+        orders: orderStats.rows[0],
+        wishlist_items: 0,
+        cart_items: 0,
+      };
 
-  try {
-    await createSchema();
-    if (CLEAN) await cleanData();
+      // Try to get wishlist count (gracefully handle if table doesn't exist)
+      try {
+        const wishlistCount = await db.query(
+          "SELECT COUNT(*) FROM wishlists WHERE user_id = $1",
+          [userId],
+        );
+        stats.wishlist_items = parseInt(wishlistCount.rows[0].count);
+      } catch (wishlistError) {
+        console.log("Wishlist table not found, skipping wishlist count");
+        // Keep default value of 0
+      }
 
-    const userIds = await seedUsers();
-    const variants = await seedProducts();
-    await seedPromotions();
-    const delivered = await seedOrders(userIds, variants);
-    await seedReturns(delivered);
-    await seedCarts(userIds, variants);
-    await seedReferrals(userIds);
-    await printSummary();
+      // Try to get cart count (gracefully handle if table doesn't exist)
+      try {
+        const cartCount = await db.query(
+          "SELECT COUNT(*) FROM carts WHERE user_id = $1",
+          [userId],
+        );
+        stats.cart_items = parseInt(cartCount.rows[0].count);
+      } catch (cartError) {
+        console.log("Cart query failed, using default count");
+        // Keep default value of 0
+      }
 
-    console.log("\n✅  Seeding complete!\n");
-  } catch (err) {
-    console.error("\n❌  Seeding failed:", err.message);
-    console.error(err.stack);
-    process.exit(1);
-  } finally {
-    await pool.end();
-  }
-}
+      res.json({
+        success: true,
+        stats,
+      });
+    } catch (error) {
+      console.error("Get user stats error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch user statistics",
+      });
+    }
+  },
+};
 
-main();
+module.exports = userController;

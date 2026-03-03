@@ -7,7 +7,6 @@ const { Pool } = require("pg");
 const { v4: uuidv4 } = require("uuid");
 const bcrypt = require("bcryptjs");
 
-// ── DB connection (mirrors src/config/database.js) ────────────────────────────
 const isRailway = process.env.DATABASE_URL?.includes("railway.app");
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -21,7 +20,6 @@ const pool = new Pool({
 const db = { query: (text, params) => pool.query(text, params) };
 const CLEAN = process.argv.includes("--clean");
 
-// ── Palette of realistic seed data ───────────────────────────────────────────
 const USERS = [
   {
     name: "Amara Okonkwo",
@@ -46,8 +44,7 @@ const PRODUCTS = [
   {
     name: "Portable Monitor 15.6 Inch 1080P USB-C",
     category: "Electronics",
-    description:
-      "Full HD portable display with USB-C and HDMI connectivity. Ideal for laptops and gaming.",
+    description: "Full HD portable display with USB-C and HDMI connectivity.",
     variants: [
       { color: "Black", size: null, base_price: 98837, discount_percentage: 0 },
       {
@@ -112,8 +109,7 @@ const PRODUCTS = [
   {
     name: "Non-stick Granite Cookware Set (5-piece)",
     category: "Home & Kitchen",
-    description:
-      "Granite-coated pots and pans, induction-compatible, heat-resistant handles.",
+    description: "Granite-coated pots and pans, induction-compatible.",
     variants: [
       { color: "Grey", size: null, base_price: 34900, discount_percentage: 15 },
       {
@@ -138,7 +134,7 @@ const PRODUCTS = [
   {
     name: "Luxury Perfume Gift Set",
     category: "Beauty",
-    description: "Set of 3 × 50 ml Eau de Parfum with presentation box.",
+    description: "Set of 3 x 50 ml Eau de Parfum with presentation box.",
     variants: [
       {
         color: "Gold Edition",
@@ -164,9 +160,7 @@ const RETURN_REASONS = [
   "missing_item",
   "other",
 ];
-
 const RETURN_METHODS = ["original_payment", "store_credit", "bank_transfer"];
-
 const ORDER_STATUSES = [
   "pending",
   "processing",
@@ -176,162 +170,112 @@ const ORDER_STATUSES = [
   "return_requested",
 ];
 
-// ── Utilities ─────────────────────────────────────────────────────────────────
 const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const randN = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const daysAgo = (n) => new Date(Date.now() - n * 86_400_000);
 const daysFromNow = (n) => new Date(Date.now() + n * 86_400_000);
-
 function log(msg) {
-  console.log(`  ✓ ${msg}`);
+  console.log("  \u2713 " + msg);
 }
 function warn(msg) {
-  console.warn(`  ⚠ ${msg}`);
+  console.warn("  \u26a0 " + msg);
 }
 function section(title) {
-  console.log(`\n${"─".repeat(50)}`);
-  console.log(`  ${title}`);
-  console.log("─".repeat(50));
+  console.log("\n" + "-".repeat(50) + "\n  " + title + "\n" + "-".repeat(50));
 }
 
-// ── Schema creation ───────────────────────────────────────────────────────────
 async function createSchema() {
   section("Creating / verifying schema");
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      name              TEXT NOT NULL,
-      email             TEXT UNIQUE NOT NULL,
-      phone             TEXT,
-      password_hash     TEXT NOT NULL,
-      role              TEXT NOT NULL DEFAULT 'customer',
-      is_verified       BOOLEAN DEFAULT true,
-      avatar_url        TEXT,
-      created_at        TIMESTAMPTZ DEFAULT NOW(),
-      updated_at        TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  await db.query(`CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    full_name TEXT, email TEXT UNIQUE NOT NULL, phone_number TEXT,
+    password_hash TEXT, role TEXT NOT NULL DEFAULT 'customer',
+    is_verified BOOLEAN DEFAULT true, signup_method TEXT DEFAULT 'phone',
+    profile_image TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
   log("users");
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS products (
-      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      name        TEXT NOT NULL,
-      category    TEXT NOT NULL,
-      description TEXT,
-      images      JSONB DEFAULT '[]'::jsonb,
-      is_active   BOOLEAN DEFAULT true,
-      created_at  TIMESTAMPTZ DEFAULT NOW(),
-      updated_at  TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  await db.query(`CREATE TABLE IF NOT EXISTS products (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL, category TEXT NOT NULL, description TEXT,
+    price NUMERIC(12,2) NOT NULL DEFAULT 0, original_price NUMERIC(12,2),
+    discount_percentage NUMERIC(5,2) DEFAULT 0, stock_quantity INT DEFAULT 0,
+    rating NUMERIC(3,1) DEFAULT 0, brand TEXT, tags TEXT[] DEFAULT '{}',
+    images JSONB DEFAULT '[]'::jsonb, seller_id UUID,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
   log("products");
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS product_variants (
-      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      product_id          UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-      color               TEXT,
-      size                TEXT,
-      base_price          NUMERIC(12,2) NOT NULL,
-      discount_percentage NUMERIC(5,2)  DEFAULT 0,
-      stock_quantity      INT           DEFAULT 100,
-      sku                 TEXT,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  await db.query(`CREATE TABLE IF NOT EXISTS product_variants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    color TEXT, size TEXT, base_price NUMERIC(12,2) NOT NULL,
+    discount_percentage NUMERIC(5,2) DEFAULT 0, stock_quantity INT DEFAULT 100,
+    sku TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
   log("product_variants");
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      total_amount      NUMERIC(12,2) NOT NULL,
-      discount_amount   NUMERIC(12,2) DEFAULT 0,
-      delivery_address  JSONB,
-      status            TEXT NOT NULL DEFAULT 'pending',
-      payment_method    TEXT NOT NULL DEFAULT 'card',
-      payment_status    TEXT NOT NULL DEFAULT 'paid',
-      estimated_delivery TIMESTAMPTZ,
-      created_at        TIMESTAMPTZ DEFAULT NOW(),
-      updated_at        TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  await db.query(`CREATE TABLE IF NOT EXISTS orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    total_amount NUMERIC(12,2) NOT NULL, discount_amount NUMERIC(12,2) DEFAULT 0,
+    delivery_address JSONB, status TEXT NOT NULL DEFAULT 'pending',
+    payment_method TEXT NOT NULL DEFAULT 'card', payment_status TEXT NOT NULL DEFAULT 'paid',
+    estimated_delivery TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
   log("orders");
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS order_items (
-      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      order_id            UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-      product_variant_id  UUID NOT NULL REFERENCES product_variants(id),
-      quantity            INT           NOT NULL DEFAULT 1,
-      unit_price          NUMERIC(12,2) NOT NULL,
-      subtotal            NUMERIC(12,2) NOT NULL,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  await db.query(`CREATE TABLE IF NOT EXISTS order_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    product_variant_id UUID NOT NULL REFERENCES product_variants(id),
+    quantity INT NOT NULL DEFAULT 1, unit_price NUMERIC(12,2) NOT NULL,
+    subtotal NUMERIC(12,2) NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
   log("order_items");
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS order_returns (
-      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      order_id       UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-      user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      reason         TEXT NOT NULL,
-      details        TEXT,
-      status         TEXT NOT NULL DEFAULT 'pending',
-      refund_method  TEXT NOT NULL DEFAULT 'original_payment',
-      refund_amount  NUMERIC(12,2),
-      admin_note     TEXT,
-      created_at     TIMESTAMPTZ DEFAULT NOW(),
-      updated_at     TIMESTAMPTZ DEFAULT NOW(),
-      resolved_at    TIMESTAMPTZ
-    )
-  `);
+  await db.query(`CREATE TABLE IF NOT EXISTS order_returns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL, details TEXT, status TEXT NOT NULL DEFAULT 'pending',
+    refund_method TEXT NOT NULL DEFAULT 'original_payment', refund_amount NUMERIC(12,2),
+    admin_note TEXT, created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ
+  )`);
   log("order_returns");
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS carts (
-      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      product_variant_id  UUID NOT NULL REFERENCES product_variants(id),
-      quantity            INT DEFAULT 1,
-      is_selected         BOOLEAN DEFAULT true,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  await db.query(`CREATE TABLE IF NOT EXISTS carts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_variant_id UUID NOT NULL REFERENCES product_variants(id),
+    quantity INT DEFAULT 1, is_selected BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
   log("carts");
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS promotions (
-      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      code                TEXT UNIQUE NOT NULL,
-      discount_percentage NUMERIC(5,2) NOT NULL,
-      expiry_date         TIMESTAMPTZ NOT NULL,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  await db.query(`CREATE TABLE IF NOT EXISTS promotions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code TEXT UNIQUE NOT NULL, discount_percentage NUMERIC(5,2) NOT NULL,
+    expiry_date TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
   log("promotions");
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS referrals (
-      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      referrer_id      UUID REFERENCES users(id) ON DELETE CASCADE,
-      referred_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-      status           TEXT DEFAULT 'pending',
-      points_awarded   INT  DEFAULT 0,
-      completed_at     TIMESTAMPTZ,
-      created_at       TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  await db.query(`CREATE TABLE IF NOT EXISTS referrals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    referrer_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    referred_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    referral_code TEXT NOT NULL DEFAULT '',
+    status TEXT DEFAULT 'pending', points_awarded INT DEFAULT 0,
+    completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
   log("referrals");
 }
 
-// ── Clean slate ───────────────────────────────────────────────────────────────
 async function cleanData() {
   section("Cleaning existing seed data");
-  // Order matters — children first
   const tables = [
     "order_returns",
     "order_items",
@@ -344,96 +288,75 @@ async function cleanData() {
     "users",
   ];
   for (const t of tables) {
-    await db.query(`DELETE FROM ${t}`);
-    log(`cleared ${t}`);
+    await db.query("DELETE FROM " + t);
+    log("cleared " + t);
   }
 }
 
-// ── Seed users ────────────────────────────────────────────────────────────────
-// Columns match your actual schema (confirmed from userController.js):
-//   full_name, email, phone_number, password_hash, role
 async function seedUsers() {
   section("Seeding users");
   const hash = await bcrypt.hash("Password123!", 10);
   const ids = [];
-
   for (const u of USERS) {
     const res = await db.query(
       `INSERT INTO users (full_name, email, phone_number, password_hash, role)
-       VALUES ($1, $2, $3, $4, 'customer')
+       VALUES ($1,$2,$3,$4,'customer')
        ON CONFLICT (email) DO UPDATE
-         SET full_name     = EXCLUDED.full_name,
-             phone_number  = EXCLUDED.phone_number,
-             password_hash = EXCLUDED.password_hash
+         SET full_name=EXCLUDED.full_name, phone_number=EXCLUDED.phone_number, password_hash=EXCLUDED.password_hash
        RETURNING id`,
       [u.name, u.email, u.phone, hash],
     );
     ids.push(res.rows[0].id);
-    log(`user: ${u.name} <${u.email}>`);
+    log("user: " + u.name + " <" + u.email + ">");
   }
-
   await db.query(
     `INSERT INTO users (full_name, email, phone_number, password_hash, role)
-     VALUES ('Admin User', 'admin@ahia.ng', '+2348099999999', $1, 'admin')
-     ON CONFLICT (email) DO UPDATE
-       SET role          = 'admin',
-           password_hash = EXCLUDED.password_hash
-     RETURNING id`,
+     VALUES ('Admin User','admin@ahia.ng','+2348099999999',$1,'admin')
+     ON CONFLICT (email) DO UPDATE SET role='admin', password_hash=EXCLUDED.password_hash`,
     [hash],
   );
   log("user: Admin User <admin@ahia.ng>");
-
   return ids;
 }
 
-// ── Seed products + variants ──────────────────────────────────────────────────
 async function seedProducts() {
   section("Seeding products & variants");
   const variantIds = [];
-
   for (const p of PRODUCTS) {
-    // price = lowest variant base_price after discount (matches products.price column)
     const minPrice = Math.min(
-      ...p.variants.map((v) => {
-        const disc = v.base_price * (v.discount_percentage / 100);
-        return v.base_price - disc;
-      }),
+      ...p.variants.map(
+        (v) => v.base_price - v.base_price * (v.discount_percentage / 100),
+      ),
     );
     const maxPrice = Math.max(...p.variants.map((v) => v.base_price));
-    // discount_percentage on the product row = average across variants
     const avgDisc =
       p.variants.reduce((s, v) => s + v.discount_percentage, 0) /
       p.variants.length;
-
     const prodRes = await db.query(
-      `INSERT INTO products
-         (name, category, description, images,
-          price, original_price, discount_percentage,
-          stock_quantity, rating, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-       RETURNING id`,
+      `INSERT INTO products (name,category,description,images,price,original_price,discount_percentage,stock_quantity,rating,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW()) RETURNING id`,
       [
         p.name,
         p.category,
         p.description,
         JSON.stringify(["/placeholder.png"]),
-        minPrice.toFixed(2), // price (after discount)
-        maxPrice.toFixed(2), // original_price
-        avgDisc.toFixed(2), // discount_percentage
-        randN(20, 200), // stock_quantity
-        (3.5 + Math.random() * 1.5).toFixed(1), // rating 3.5–5.0
+        minPrice.toFixed(2),
+        maxPrice.toFixed(2),
+        avgDisc.toFixed(2),
+        randN(20, 200),
+        (3.5 + Math.random() * 1.5).toFixed(1),
       ],
     );
     const productId = prodRes.rows[0].id;
-    log(`product: ${p.name} — ₦${minPrice.toLocaleString()}`);
-
+    log("product: " + p.name);
     for (const v of p.variants) {
-      const sku = `${p.category.slice(0, 3).toUpperCase()}-${uuidv4().slice(0, 6).toUpperCase()}`;
+      const sku =
+        p.category.slice(0, 3).toUpperCase() +
+        "-" +
+        uuidv4().slice(0, 6).toUpperCase();
       const varRes = await db.query(
-        `INSERT INTO product_variants
-           (product_id, color, size, base_price, discount_percentage, stock_quantity, sku)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id`,
+        `INSERT INTO product_variants (product_id,color,size,base_price,discount_percentage,stock_quantity,sku)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
         [
           productId,
           v.color,
@@ -446,15 +369,17 @@ async function seedProducts() {
       );
       variantIds.push({ id: varRes.rows[0].id, ...v });
       log(
-        `  variant: ${v.color || ""}${v.size ? ` / ${v.size}` : ""} — ₦${v.base_price.toLocaleString()}`,
+        "  variant: " +
+          (v.color || "") +
+          (v.size ? " / " + v.size : "") +
+          " - N" +
+          v.base_price.toLocaleString(),
       );
     }
   }
-
   return variantIds;
 }
 
-// ── Seed promotions ───────────────────────────────────────────────────────────
 async function seedPromotions() {
   section("Seeding promotions");
   const promos = [
@@ -473,20 +398,16 @@ async function seedPromotions() {
   ];
   for (const p of promos) {
     await db.query(
-      `INSERT INTO promotions (code, discount_percentage, expiry_date)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (code) DO NOTHING`,
+      `INSERT INTO promotions (code,discount_percentage,expiry_date) VALUES ($1,$2,$3) ON CONFLICT (code) DO NOTHING`,
       [p.code, p.discount_percentage, p.expiry_date],
     );
-    log(`promo: ${p.code} (${p.discount_percentage}% off)`);
+    log("promo: " + p.code);
   }
 }
 
-// ── Seed orders + items ───────────────────────────────────────────────────────
 async function seedOrders(userIds, variants) {
   section("Seeding orders & order items");
-  const deliveredOrderIds = []; // used later to attach returns
-
+  const deliveredOrders = [];
   const addresses = [
     {
       street: "14 Adeola Odeku St",
@@ -519,55 +440,41 @@ async function seedOrders(userIds, variants) {
       country: "Nigeria",
     },
   ];
-
-  const paymentMethods = ["card", "bank_transfer", "ussd", "wallet"];
-
-  // 4 orders per user → 20 orders total, varied statuses
   for (const userId of userIds) {
     for (let i = 0; i < 4; i++) {
       const orderId = uuidv4();
       const status = rand(ORDER_STATUSES);
       const createdAt = daysAgo(randN(5, 60));
       const estimatedDelivery = daysFromNow(randN(2, 7));
-      const paymentMethod = rand(paymentMethods);
+      const paymentMethod = rand(["card", "bank_transfer", "ussd", "wallet"]);
       const address = rand(addresses);
-
-      // Pick 1–3 random variants for this order
-      const chosenVariants = [];
-      const count = randN(1, 3);
-      const shuffled = [...variants].sort(() => Math.random() - 0.5);
-      for (let j = 0; j < count; j++) chosenVariants.push(shuffled[j]);
-
-      // Calculate totals
-      let totalAmount = 0;
-      let discountAmount = 0;
-      const lineItems = chosenVariants.map((v) => {
+      const chosen = [...variants]
+        .sort(() => Math.random() - 0.5)
+        .slice(0, randN(1, 3));
+      let total = 0,
+        discount = 0;
+      const lineItems = chosen.map((v) => {
         const disc = v.base_price * (v.discount_percentage / 100);
         const unit = v.base_price - disc;
         const qty = randN(1, 2);
         const sub = unit * qty;
-        totalAmount += sub;
-        discountAmount += disc * qty;
+        total += sub;
+        discount += disc * qty;
         return { variantId: v.id, qty, unit, sub };
       });
-
-      // Apply random promo discount (30% chance)
       if (Math.random() < 0.3) {
-        const extra = totalAmount * 0.1;
-        discountAmount += extra;
-        totalAmount -= extra;
+        const x = total * 0.1;
+        discount += x;
+        total -= x;
       }
-
       await db.query(
-        `INSERT INTO orders
-           (id, user_id, total_amount, discount_amount, delivery_address, status,
-            payment_method, payment_status, estimated_delivery, created_at, updated_at)
+        `INSERT INTO orders (id,user_id,total_amount,discount_amount,delivery_address,status,payment_method,payment_status,estimated_delivery,created_at,updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'paid',$8,$9,$9)`,
         [
           orderId,
           userId,
-          totalAmount.toFixed(2),
-          discountAmount.toFixed(2),
+          total.toFixed(2),
+          discount.toFixed(2),
           JSON.stringify(address),
           status,
           paymentMethod,
@@ -575,11 +482,9 @@ async function seedOrders(userIds, variants) {
           createdAt,
         ],
       );
-
       for (const li of lineItems) {
         await db.query(
-          `INSERT INTO order_items (id, order_id, product_variant_id, quantity, unit_price, subtotal, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          `INSERT INTO order_items (id,order_id,product_variant_id,quantity,unit_price,subtotal,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [
             uuidv4(),
             orderId,
@@ -591,69 +496,66 @@ async function seedOrders(userIds, variants) {
           ],
         );
       }
-
-      // Track delivered orders for return seeding
       if (status === "delivered" || status === "return_requested") {
-        deliveredOrderIds.push({ orderId, userId, totalAmount, createdAt });
+        deliveredOrders.push({
+          orderId,
+          userId,
+          totalAmount: total,
+          createdAt,
+        });
       }
-
       log(
-        `order ${orderId.slice(0, 8)}… [${status}] ₦${totalAmount.toFixed(0)} · ${paymentMethod}`,
+        "order " +
+          orderId.slice(0, 8) +
+          "... [" +
+          status +
+          "] N" +
+          total.toFixed(0),
       );
     }
   }
-
-  return deliveredOrderIds;
+  return deliveredOrders;
 }
 
-// ── Seed return requests ──────────────────────────────────────────────────────
 async function seedReturns(deliveredOrders) {
   section("Seeding return requests");
-
-  if (deliveredOrders.length === 0) {
-    warn("No delivered orders found — skipping returns");
+  if (!deliveredOrders.length) {
+    warn("No delivered orders - skipping");
     return;
   }
-
-  const returnStatuses = ["pending", "approved", "rejected", "completed"];
-
-  // Create a return for roughly 70% of delivered orders
   for (const { orderId, userId, totalAmount, createdAt } of deliveredOrders) {
-    if (Math.random() > 0.7) continue; // skip ~30%
-
+    if (Math.random() > 0.7) continue;
     const returnId = uuidv4();
     const reason = rand(RETURN_REASONS);
     const method = rand(RETURN_METHODS);
-    const status = rand(returnStatuses);
+    const status = rand(["pending", "approved", "rejected", "completed"]);
     const returnedAt = new Date(
       new Date(createdAt).getTime() + randN(1, 15) * 86_400_000,
     );
     const resolvedAt = ["rejected", "completed"].includes(status)
       ? new Date(returnedAt.getTime() + randN(2, 5) * 86_400_000)
       : null;
-
     const adminNote = {
-      rejected: "Return request did not meet our policy requirements.",
-      completed: "Refund has been processed to your original payment method.",
+      rejected: "Return did not meet policy.",
+      completed: "Refund processed.",
       approved: null,
       pending: null,
     }[status];
-
+    const details =
+      reason === "damaged"
+        ? "Product arrived with cracked screen."
+        : reason === "wrong_item"
+          ? "Received wrong variant."
+          : null;
     await db.query(
-      `INSERT INTO order_returns
-         (id, order_id, user_id, reason, details, status, refund_method,
-          refund_amount, admin_note, created_at, updated_at, resolved_at)
+      `INSERT INTO order_returns (id,order_id,user_id,reason,details,status,refund_method,refund_amount,admin_note,created_at,updated_at,resolved_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11)`,
       [
         returnId,
         orderId,
         userId,
         reason,
-        reason === "damaged"
-          ? "The product arrived with a cracked screen and dented casing."
-          : reason === "wrong_item"
-            ? "I ordered the black variant but received white."
-            : null,
+        details,
         status,
         method,
         totalAmount.toFixed(2),
@@ -662,55 +564,42 @@ async function seedReturns(deliveredOrders) {
         resolvedAt,
       ],
     );
-
-    log(
-      `return ${returnId.slice(0, 8)}… [${status}] reason=${reason} · ₦${totalAmount.toFixed(0)}`,
-    );
+    log("return " + returnId.slice(0, 8) + "... [" + status + "] " + reason);
   }
 }
 
-// ── Seed carts ────────────────────────────────────────────────────────────────
 async function seedCarts(userIds, variants) {
   section("Seeding carts");
-  // Give first 2 users active cart items
   for (const userId of userIds.slice(0, 2)) {
     const picks = [...variants]
       .sort(() => Math.random() - 0.5)
       .slice(0, randN(1, 3));
     for (const v of picks) {
       await db.query(
-        `INSERT INTO carts (user_id, product_variant_id, quantity, is_selected)
-         VALUES ($1, $2, $3, true)
-         ON CONFLICT DO NOTHING`,
+        `INSERT INTO carts (user_id,product_variant_id,quantity,is_selected) VALUES ($1,$2,$3,true) ON CONFLICT DO NOTHING`,
         [userId, v.id, randN(1, 2)],
       );
-      log(
-        `cart item for user ${userId.slice(0, 8)}… → variant ${v.id.slice(0, 8)}…`,
-      );
+      log("cart: " + userId.slice(0, 8) + "... -> " + v.id.slice(0, 8) + "...");
     }
   }
 }
 
-// ── Seed referrals ────────────────────────────────────────────────────────────
 async function seedReferrals(userIds) {
   section("Seeding referrals");
-  // User 0 referred users 1 and 2
-  // referral_code is a unique code the referrer shares — generate a short random one
   for (let i = 1; i <= 2; i++) {
-    const code = `AHIA-${uuidv4().slice(0, 8).toUpperCase()}`;
+    const code = "AHIA-" + uuidv4().slice(0, 8).toUpperCase();
     await db.query(
-      `INSERT INTO referrals (referrer_id, referred_user_id, referral_code, status, points_awarded, completed_at)
-       VALUES ($1, $2, $3, 'completed', 500, NOW())`,
+      `INSERT INTO referrals (referrer_id,referred_user_id,referral_code,status,points_awarded,completed_at)
+       VALUES ($1,$2,$3,'completed',500,NOW())`,
       [userIds[0], userIds[i], code],
     );
-    log(`referral: user[0] → user[${i}] (code: ${code})`);
+    log("referral: user[0] -> user[" + i + "] (" + code + ")");
   }
 }
 
-// ── Summary ───────────────────────────────────────────────────────────────────
 async function printSummary() {
   section("Seed summary");
-  const tables = [
+  for (const t of [
     "users",
     "products",
     "product_variants",
@@ -719,37 +608,26 @@ async function printSummary() {
     "order_returns",
     "carts",
     "promotions",
-  ];
-  for (const t of tables) {
-    const res = await db.query(`SELECT COUNT(*) FROM ${t}`);
-    log(`${t}: ${res.rows[0].count} rows`);
+  ]) {
+    const res = await db.query("SELECT COUNT(*) FROM " + t);
+    log(t + ": " + res.rows[0].count + " rows");
   }
-  console.log(`
-  ─────────────────────────────────────────────
-  Test credentials (all passwords: Password123!)
-  ─────────────────────────────────────────────
-  Customer : amara@example.com
-  Customer : chidi@example.com
-  Customer : fatima@example.com
-  Admin    : admin@ahia.ng
-  ─────────────────────────────────────────────
-  `);
+  console.log(
+    "\n  Test credentials (password: Password123!)\n  amara@example.com / admin@ahia.ng\n",
+  );
 }
 
-// ── Entry point ───────────────────────────────────────────────────────────────
 async function main() {
-  console.log("\n🌱  Ahia DB Seeder");
+  console.log("\n Ahia DB Seeder");
+  console.log("   Mode: " + (CLEAN ? "CLEAN" : "UPSERT"));
   console.log(
-    `   Mode  : ${CLEAN ? "CLEAN (delete + reseed)" : "UPSERT (safe)"}`,
+    "   DB  : " +
+      (process.env.DATABASE_URL || "").replace(/:[^:@]+@/, ":***@") +
+      "\n",
   );
-  console.log(
-    `   DB    : ${process.env.DATABASE_URL?.replace(/:[^:@]+@/, ":***@")}\n`,
-  );
-
   try {
     await createSchema();
     if (CLEAN) await cleanData();
-
     const userIds = await seedUsers();
     const variants = await seedProducts();
     await seedPromotions();
@@ -758,10 +636,9 @@ async function main() {
     await seedCarts(userIds, variants);
     await seedReferrals(userIds);
     await printSummary();
-
-    console.log("\n✅  Seeding complete!\n");
+    console.log("\n Seeding complete!\n");
   } catch (err) {
-    console.error("\n❌  Seeding failed:", err.message);
+    console.error("\n Seeding failed:", err.message);
     console.error(err.stack);
     process.exit(1);
   } finally {
