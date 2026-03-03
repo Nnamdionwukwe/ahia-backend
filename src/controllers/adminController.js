@@ -224,12 +224,10 @@ const adminController = {
       });
     } catch (error) {
       console.error("verifyUser error:", error);
-      res
-        .status(500)
-        .json({
-          success: false,
-          message: "Failed to update verification status",
-        });
+      res.status(500).json({
+        success: false,
+        message: "Failed to update verification status",
+      });
     }
   },
 
@@ -469,12 +467,10 @@ const adminController = {
       if (olderThanDays) {
         const days = parseInt(olderThanDays);
         if (isNaN(days) || days < 1)
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: "olderThanDays must be a positive integer",
-            });
+          return res.status(400).json({
+            success: false,
+            message: "olderThanDays must be a positive integer",
+          });
         conditions.push(`created_at < NOW() - INTERVAL '${days} days'`);
       }
       if (!confirmPaid) conditions.push(`payment_status != 'paid'`);
@@ -517,13 +513,11 @@ const adminController = {
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("clearAllOrders error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "Failed to clear orders",
-          error: error.message,
-        });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to clear orders",
+        error: error.message,
+      });
     } finally {
       client.release();
     }
@@ -567,14 +561,18 @@ const adminController = {
       const offset = (page - 1) * limit;
       const params = [];
       let query = `
-        SELECT r.id, r.order_id, r.user_id, r.reason, r.details, r.status,
-               r.refund_method, r.refund_amount, r.admin_note, r.created_at, r.resolved_at,
-               u.full_name AS user_name, u.email AS user_email, u.phone_number AS user_phone,
-               o.total_amount AS order_total, o.payment_method
-        FROM order_returns r
-        JOIN users  u ON r.user_id  = u.id
-        JOIN orders o ON r.order_id = o.id
-        WHERE 1=1`;
+      SELECT r.id, r.order_id, r.user_id, r.reason, r.details, r.status,
+             r.refund_method, r.refund_amount, r.admin_note, r.media,   -- ← media added
+             r.created_at, r.resolved_at,
+             u.full_name    AS user_name,
+             u.email        AS user_email,
+             u.phone_number AS user_phone,
+             o.total_amount AS order_total,
+             o.payment_method
+      FROM order_returns r
+      JOIN users  u ON r.user_id  = u.id
+      JOIN orders o ON r.order_id = o.id
+      WHERE 1=1`;
       if (status) {
         params.push(status);
         query += ` AND r.status = $${params.length}`;
@@ -584,7 +582,16 @@ const adminController = {
       query += ` LIMIT $${params.length}`;
       params.push(Number(offset));
       query += ` OFFSET $${params.length}`;
+
       const result = await db.query(query, params);
+
+      // Parse media if stored as string (some PG drivers return JSONB as string)
+      const returns = result.rows.map((r) => ({
+        ...r,
+        media:
+          typeof r.media === "string" ? JSON.parse(r.media) : r.media || [],
+      }));
+
       const counts = await db.query(
         `SELECT status, COUNT(*) as count FROM order_returns GROUP BY status`,
       );
@@ -592,11 +599,12 @@ const adminController = {
         acc[r.status] = parseInt(r.count);
         return acc;
       }, {});
+
       return res.json({
         success: true,
-        returns: result.rows,
+        returns,
         counts: statusCounts,
-        total: result.rows.length,
+        total: returns.length,
       });
     } catch (error) {
       console.error("getAllReturns error:", error);
@@ -614,12 +622,10 @@ const adminController = {
       const adminId = req.user.id;
 
       if (!action)
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: 'action required: "approve" | "reject" | "complete"',
-          });
+        return res.status(400).json({
+          success: false,
+          message: 'action required: "approve" | "reject" | "complete"',
+        });
       if (!["approve", "reject", "complete"].includes(action))
         return res
           .status(400)
@@ -642,21 +648,17 @@ const adminController = {
 
       if (ret.status !== "pending" && action !== "complete") {
         await client.query("ROLLBACK");
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: `Return is already "${ret.status}" — cannot ${action} it`,
-          });
+        return res.status(400).json({
+          success: false,
+          message: `Return is already "${ret.status}" — cannot ${action} it`,
+        });
       }
       if (action === "complete" && ret.status !== "approved") {
         await client.query("ROLLBACK");
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: 'Only "approved" returns can be completed',
-          });
+        return res.status(400).json({
+          success: false,
+          message: 'Only "approved" returns can be completed',
+        });
       }
 
       const newStatus = {
@@ -717,13 +719,11 @@ const adminController = {
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("processReturn error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "Failed to process return",
-          error: error.message,
-        });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to process return",
+        error: error.message,
+      });
     } finally {
       client.release();
     }
