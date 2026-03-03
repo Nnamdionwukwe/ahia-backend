@@ -284,7 +284,6 @@ async function createSchema() {
       refund_method  TEXT NOT NULL DEFAULT 'original_payment',
       refund_amount  NUMERIC(12,2),
       admin_note     TEXT,
-      media          JSONB DEFAULT '[]'::jsonb,
       created_at     TIMESTAMPTZ DEFAULT NOW(),
       updated_at     TIMESTAMPTZ DEFAULT NOW(),
       resolved_at    TIMESTAMPTZ
@@ -393,22 +392,57 @@ async function seedProducts() {
   const variantIds = [];
 
   for (const p of PRODUCTS) {
+    // price = lowest variant base_price after discount (matches products.price column)
+    const minPrice = Math.min(
+      ...p.variants.map((v) => {
+        const disc = v.base_price * (v.discount_percentage / 100);
+        return v.base_price - disc;
+      }),
+    );
+    const maxPrice = Math.max(...p.variants.map((v) => v.base_price));
+    // discount_percentage on the product row = average across variants
+    const avgDisc =
+      p.variants.reduce((s, v) => s + v.discount_percentage, 0) /
+      p.variants.length;
+
     const prodRes = await db.query(
-      `INSERT INTO products (name, category, description, images)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO products
+         (name, category, description, images,
+          price, original_price, discount_percentage,
+          stock_quantity, rating, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
        RETURNING id`,
-      [p.name, p.category, p.description, JSON.stringify(["/placeholder.png"])],
+      [
+        p.name,
+        p.category,
+        p.description,
+        JSON.stringify(["/placeholder.png"]),
+        minPrice.toFixed(2), // price (after discount)
+        maxPrice.toFixed(2), // original_price
+        avgDisc.toFixed(2), // discount_percentage
+        randN(20, 200), // stock_quantity
+        (3.5 + Math.random() * 1.5).toFixed(1), // rating 3.5–5.0
+      ],
     );
     const productId = prodRes.rows[0].id;
-    log(`product: ${p.name}`);
+    log(`product: ${p.name} — ₦${minPrice.toLocaleString()}`);
 
     for (const v of p.variants) {
       const sku = `${p.category.slice(0, 3).toUpperCase()}-${uuidv4().slice(0, 6).toUpperCase()}`;
       const varRes = await db.query(
-        `INSERT INTO product_variants (product_id, color, size, base_price, discount_percentage, sku)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO product_variants
+           (product_id, color, size, base_price, discount_percentage, stock_quantity, sku)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [productId, v.color, v.size, v.base_price, v.discount_percentage, sku],
+        [
+          productId,
+          v.color,
+          v.size,
+          v.base_price,
+          v.discount_percentage,
+          randN(10, 100),
+          sku,
+        ],
       );
       variantIds.push({ id: varRes.rows[0].id, ...v });
       log(
@@ -605,25 +639,11 @@ async function seedReturns(deliveredOrders) {
       pending: null,
     }[status];
 
-    // Sample media metadata (as if files were already uploaded)
-    const media =
-      reason === "damaged"
-        ? [
-            {
-              filename: `return-sample-${returnId.slice(0, 8)}.jpg`,
-              url: `/uploads/returns/return-sample-${returnId.slice(0, 8)}.jpg`,
-              mimetype: "image/jpeg",
-              size: 184320,
-              type: "image",
-            },
-          ]
-        : [];
-
     await db.query(
       `INSERT INTO order_returns
          (id, order_id, user_id, reason, details, status, refund_method,
-          refund_amount, admin_note, media, created_at, updated_at, resolved_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,$12)`,
+          refund_amount, admin_note, created_at, updated_at, resolved_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11)`,
       [
         returnId,
         orderId,
@@ -638,7 +658,6 @@ async function seedReturns(deliveredOrders) {
         method,
         totalAmount.toFixed(2),
         adminNote,
-        JSON.stringify(media),
         returnedAt,
         resolvedAt,
       ],
@@ -676,13 +695,15 @@ async function seedCarts(userIds, variants) {
 async function seedReferrals(userIds) {
   section("Seeding referrals");
   // User 0 referred users 1 and 2
+  // referral_code is a unique code the referrer shares — generate a short random one
   for (let i = 1; i <= 2; i++) {
+    const code = `AHIA-${uuidv4().slice(0, 8).toUpperCase()}`;
     await db.query(
-      `INSERT INTO referrals (referrer_id, referred_user_id, status, points_awarded, completed_at)
-       VALUES ($1, $2, 'completed', 500, NOW())`,
-      [userIds[0], userIds[i]],
+      `INSERT INTO referrals (referrer_id, referred_user_id, referral_code, status, points_awarded, completed_at)
+       VALUES ($1, $2, $3, 'completed', 500, NOW())`,
+      [userIds[0], userIds[i], code],
     );
-    log(`referral: user[0] → user[${i}]`);
+    log(`referral: user[0] → user[${i}] (code: ${code})`);
   }
 }
 
