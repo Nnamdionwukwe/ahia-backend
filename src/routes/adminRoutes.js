@@ -373,4 +373,24 @@ router.post(
   bankTransferController.rejectBankTransfer,
 );
 
+// ========================================================
+// RETURNS MANAGEMENT
+// ========================================================
+
+// GET  /api/admin/returns          — list all return requests
+router.get(
+  "/returns",
+  authenticateToken,
+  requireAdmin,
+  adminController.getAllReturns,
+);
+
+// PATCH /api/admin/returns/:returnId — approve or reject a return
+router.patch(
+  "/returns/:returnId",
+  authenticateToken,
+  requireAdmin,
+  adminController.processReturn,
+);
+
 module.exports = router;

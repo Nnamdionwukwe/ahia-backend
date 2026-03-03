@@ -1,4 +1,4 @@
-// src/controllers/orderController.js - UPDATED VERSION
+// src/controllers/orderController.js
 const db = require("../config/database");
 const redis = require("../config/redis");
 const { v4: uuidv4 } = require("uuid");
@@ -164,7 +164,6 @@ exports.checkout = async (req, res) => {
     );
 
     if (referral.rows.length > 0) {
-      // Award both users
       await loyaltyController.awardPoints(
         referral.rows[0].referrer_id,
         500,
@@ -218,7 +217,6 @@ exports.getOrders = async (req, res) => {
            WHERE oi.order_id = $1`,
           [order.id],
         );
-
         return {
           ...order,
           items: itemsResult.rows,
@@ -227,7 +225,6 @@ exports.getOrders = async (req, res) => {
       }),
     );
 
-    // Get total count
     const countQuery = `SELECT COUNT(*) FROM orders WHERE user_id = $1${status && status !== "all" ? ` AND status = $2` : ""}`;
     const countParams =
       status && status !== "all" ? [userId, status] : [userId];
@@ -248,38 +245,23 @@ exports.getOrders = async (req, res) => {
 };
 
 // Get order details
-// Add this validation to orderController.js getOrderDetails function
-// Replace the existing function with this:
-
 exports.getOrderDetails = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id: orderId } = req.params;
 
-    // ⭐ CRITICAL VALIDATION ⭐
-    console.log("=== GET ORDER DETAILS ===");
-    console.log("Requested orderId:", orderId);
-    console.log("OrderId type:", typeof orderId);
-    console.log("UserId:", userId);
-
-    // Validate orderId is not undefined or 'undefined' string
     if (!orderId || orderId === "undefined" || orderId === "null") {
-      console.error("❌ Invalid orderId received:", orderId);
-      return res.status(400).json({
-        error: "Invalid order ID",
-        received: orderId,
-      });
+      return res
+        .status(400)
+        .json({ error: "Invalid order ID", received: orderId });
     }
 
-    // Validate UUID format (basic check)
     const uuidRegex =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(orderId)) {
-      console.error("❌ Invalid UUID format:", orderId);
-      return res.status(400).json({
-        error: "Invalid order ID format",
-        received: orderId,
-      });
+      return res
+        .status(400)
+        .json({ error: "Invalid order ID format", received: orderId });
     }
 
     const order = await db.query(
@@ -288,7 +270,6 @@ exports.getOrderDetails = async (req, res) => {
     );
 
     if (order.rows.length === 0) {
-      console.log("❌ Order not found:", orderId);
       return res.status(404).json({ error: "Order not found" });
     }
 
@@ -301,19 +282,12 @@ exports.getOrderDetails = async (req, res) => {
       [orderId],
     );
 
-    console.log("✅ Order found:", orderId);
-    console.log("Items count:", items.rows.length);
-
-    res.json({
-      order: order.rows[0],
-      items: items.rows,
-    });
+    res.json({ order: order.rows[0], items: items.rows });
   } catch (error) {
     console.error("Get order details error:", error);
-    res.status(500).json({
-      error: "Failed to fetch order details",
-      message: error.message,
-    });
+    res
+      .status(500)
+      .json({ error: "Failed to fetch order details", message: error.message });
   }
 };
 
@@ -344,7 +318,6 @@ exports.cancelOrder = async (req, res) => {
       [orderId],
     );
 
-    // Phase 5: Send cancellation notification
     await notificationsController.notifyOrderUpdate(
       userId,
       orderId,
@@ -356,6 +329,241 @@ exports.cancelOrder = async (req, res) => {
   } catch (error) {
     console.error("Cancel order error:", error);
     res.status(500).json({ error: "Failed to cancel order" });
+  }
+};
+
+// ── Return order (customer) ───────────────────────────────────────────────────
+exports.returnOrder = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const orderId = req.params.id;
+    const { reason, details, refund_method = "original_payment" } = req.body;
+
+    // ── Validate input ────────────────────────────────────────────────────────
+    if (!reason) {
+      return res.status(400).json({ error: "reason is required" });
+    }
+
+    const validReasons = [
+      "wrong_item",
+      "damaged",
+      "not_as_described",
+      "changed_mind",
+      "missing_item",
+      "other",
+    ];
+    if (!validReasons.includes(reason)) {
+      return res.status(400).json({
+        error: `Invalid reason. Allowed: ${validReasons.join(", ")}`,
+      });
+    }
+
+    const validRefundMethods = [
+      "original_payment",
+      "store_credit",
+      "bank_transfer",
+    ];
+    if (!validRefundMethods.includes(refund_method)) {
+      return res.status(400).json({
+        error: `Invalid refund_method. Allowed: ${validRefundMethods.join(", ")}`,
+      });
+    }
+
+    // ── Verify order ownership and eligibility ────────────────────────────────
+    const orderResult = await db.query(
+      `SELECT id, status, payment_status, total_amount, created_at
+       FROM orders
+       WHERE id = $1 AND user_id = $2`,
+      [orderId, userId],
+    );
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const order = orderResult.rows[0];
+
+    // Only delivered orders can be returned
+    if (order.status !== "delivered") {
+      return res.status(400).json({
+        error: "Only delivered orders can be returned",
+        current_status: order.status,
+      });
+    }
+
+    // Enforce 30-day return window
+    const deliveredAgo = Date.now() - new Date(order.created_at).getTime();
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    if (deliveredAgo > THIRTY_DAYS) {
+      return res.status(400).json({
+        error: "Return window has expired (30 days from order date)",
+      });
+    }
+
+    // ── Check for existing return request ─────────────────────────────────────
+    const existing = await db.query(
+      `SELECT id, status FROM order_returns
+       WHERE order_id = $1 AND user_id = $2
+       ORDER BY created_at DESC LIMIT 1`,
+      [orderId, userId],
+    );
+
+    if (existing.rows.length > 0) {
+      const prev = existing.rows[0];
+      if (["pending", "approved"].includes(prev.status)) {
+        return res.status(409).json({
+          error: "A return request already exists for this order",
+          existing_return_id: prev.id,
+          existing_status: prev.status,
+        });
+      }
+    }
+
+    // ── Create return request ─────────────────────────────────────────────────
+    const returnResult = await db.query(
+      `INSERT INTO order_returns
+         (order_id, user_id, reason, details, refund_method, refund_amount, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), NOW())
+       RETURNING *`,
+      [
+        orderId,
+        userId,
+        reason,
+        details || null,
+        refund_method,
+        order.total_amount,
+      ],
+    );
+
+    // Update order status so it's visible in admin panel
+    await db.query(
+      `UPDATE orders SET status = 'return_requested', updated_at = NOW() WHERE id = $1`,
+      [orderId],
+    );
+
+    // Notify user
+    try {
+      await notificationsController.notifyOrderUpdate(
+        userId,
+        orderId,
+        "return_requested",
+        `Your return request for order #${orderId} has been received and is under review.`,
+      );
+    } catch (notifErr) {
+      console.warn("Return notification failed (non-fatal):", notifErr.message);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Return request submitted. We will review it within 1–3 business days.",
+      return: returnResult.rows[0],
+    });
+  } catch (error) {
+    console.error("returnOrder error:", error);
+    return res.status(500).json({ error: "Failed to submit return request" });
+  }
+};
+
+// ── Get customer's own return requests ───────────────────────────────────────
+exports.getMyReturns = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { status, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    const params = [userId];
+
+    let query = `
+      SELECT
+        r.id,
+        r.order_id,
+        r.reason,
+        r.details,
+        r.status,
+        r.refund_method,
+        r.refund_amount,
+        r.admin_note,
+        r.created_at,
+        r.resolved_at,
+        o.total_amount   AS order_total,
+        o.payment_method AS order_payment_method,
+        o.created_at     AS order_date
+      FROM order_returns r
+      JOIN orders o ON r.order_id = o.id
+      WHERE r.user_id = $1`;
+
+    if (status) {
+      params.push(status);
+      query += ` AND r.status = $${params.length}`;
+    }
+
+    query += ` ORDER BY r.created_at DESC`;
+    params.push(Number(limit));
+    query += ` LIMIT $${params.length}`;
+    params.push(Number(offset));
+    query += ` OFFSET $${params.length}`;
+
+    const result = await db.query(query, params);
+
+    const countResult = await db.query(
+      `SELECT COUNT(*) FROM order_returns WHERE user_id = $1${status ? " AND status = $2" : ""}`,
+      status ? [userId, status] : [userId],
+    );
+
+    return res.json({
+      success: true,
+      returns: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: parseInt(countResult.rows[0].count),
+      },
+    });
+  } catch (error) {
+    console.error("getMyReturns error:", error);
+    return res.status(500).json({ error: "Failed to fetch return requests" });
+  }
+};
+
+// GET /api/orders/returns/:returnId
+exports.getReturnDetails = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const returnId = req.params.returnId;
+
+    const result = await db.query(
+      `SELECT r.*,
+              o.total_amount   AS order_total,
+              o.payment_method AS order_payment_method,
+              o.created_at     AS order_date,
+              o.status         AS order_status
+       FROM order_returns r
+       JOIN orders o ON r.order_id = o.id
+       WHERE r.id = $1 AND r.user_id = $2`,
+      [returnId, userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Return request not found" });
+    }
+
+    const items = await db.query(
+      `SELECT oi.*, p.name, p.images, pv.color, pv.size
+       FROM order_items oi
+       JOIN product_variants pv ON oi.product_variant_id = pv.id
+       JOIN products p          ON pv.product_id = p.id
+       WHERE oi.order_id = $1`,
+      [result.rows[0].order_id],
+    );
+
+    return res.json({
+      success: true,
+      return: result.rows[0],
+      items: items.rows,
+    });
+  } catch (error) {
+    console.error("getReturnDetails error:", error);
+    return res.status(500).json({ error: "Failed to fetch return details" });
   }
 };
 
